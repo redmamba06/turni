@@ -440,14 +440,6 @@
         <button class="link-btn" data-act="addcol">+ Aggiungi collega</button>
       </div>
 
-      <div class="section-title">Calendario del telefono</div>
-      <div class="card">
-        <div class="list-row" data-act="ics">
-          <div class="grow"><div class="title">Esporta su Apple / Google Calendar</div><div class="sub">Scarica i turni (.ics) con sveglia a fine turno</div></div>
-          <span>📅</span>
-        </div>
-      </div>
-
       <div class="section-title">Privacy & tema</div>
       <div class="card">
         <div class="list-row">
@@ -474,7 +466,6 @@
     act('pay', editHourlyPay);
     act('addloc', () => editLocation(null));
     act('addcol', () => editColleague(null));
-    act('ics', exportIcs);
     act('export', exportBackup);
     act('import', importBackup);
     act('lock', toggleLock);
@@ -608,19 +599,12 @@
   function unlock() { $('#lock').classList.add('hidden'); $('#app').classList.remove('hidden'); }
   async function tryBiometric() { /* opzionale: Face ID/impronta via WebAuthn — abilitato in futuro */ }
 
-  /* ---------- Export .ics ---------- */
+  /* ---------- Download helper ---------- */
   function download(filename, text, mime) {
     const blob = new Blob([text], { type: mime || 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-  function exportIcs() {
-    const ics = S.exportIcs(true);
-    download('turni.ics', ics, 'text/calendar');
-    openSheet(`<h2>📅 Turni esportati</h2><p class="sub">Ho scaricato il file <b>turni.ics</b>.</p>
-      <p>Aprilo dal telefono e scegli "Aggiungi a Calendario": funziona con <b>Apple Calendar</b> e <b>Google Calendar</b>. Ogni turno avrà una <b>sveglia a fine turno</b> per ricordarti di segnare l'orario.</p>
-      <button class="btn" onclick="document.getElementById('sheet').classList.add('hidden')">Ok</button>`);
   }
 
   /* ---------- Backup ---------- */
