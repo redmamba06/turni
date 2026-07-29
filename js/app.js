@@ -706,6 +706,18 @@
     $$('.tab').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
     $('#btn-today').onclick = () => { calCursor = new Date(); render(); };
 
+    // Config cloud da link (?sb=...&k=...): la chiave anon è pubblica
+    if (window.Cloud) {
+      const q = new URLSearchParams(location.search);
+      const sb = q.get('sb'), k = q.get('k');
+      if (sb && k) {
+        Cloud.setConfig(sb, k);
+        q.delete('sb'); q.delete('k');
+        const qs = q.toString();
+        history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+      }
+    }
+
     // Ritorno dal link email: cattura la sessione
     let justLoggedIn = false;
     if (window.Cloud) justLoggedIn = Cloud.captureRedirect();
