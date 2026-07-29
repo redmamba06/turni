@@ -669,14 +669,19 @@
   }
 
   function openCloudConfig() {
-    openSheet(`<h2>Configura il cloud</h2><p class="sub">Incolla i due valori pubblici dal tuo progetto Supabase (Project Settings → API).</p>
-      <div class="field"><label>Project URL</label><input type="url" id="c-url" placeholder="https://xxxx.supabase.co" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
-      <div class="field"><label>anon public key</label><textarea id="c-anon" placeholder="eyJhbGciOi..." style="min-height:80px" autocapitalize="none" spellcheck="false"></textarea></div>
+    openSheet(`<h2>Configura il cloud</h2><p class="sub">Incolla qui il <b>link</b> che ti ho dato (fa tutto da solo). In alternativa, i due valori dal progetto Supabase → Settings → API.</p>
+      <div class="field"><label>Link di configurazione (o Project URL)</label><textarea id="c-url" placeholder="https://redmamba06.github.io/turni/?sb=...&k=..." style="min-height:70px" autocapitalize="none" spellcheck="false"></textarea></div>
+      <div class="field"><label>anon public key (solo se non usi il link)</label><textarea id="c-anon" placeholder="eyJhbGciOi..." style="min-height:70px" autocapitalize="none" spellcheck="false"></textarea></div>
       <button class="btn" id="c-save">Salva e accedi</button>`);
     $('#c-save').onclick = () => {
-      const url = $('#c-url').value.trim(), anon = $('#c-anon').value.trim();
-      if (!/^https:\/\/.+\.supabase\.co\/?$/.test(url)) { toast('URL Supabase non valido'); return; }
-      if (anon.length < 20) { toast('Chiave anon non valida'); return; }
+      let url = $('#c-url').value.trim(), anon = $('#c-anon').value.trim();
+      // Se ha incollato il link completo, estraggo sb e k
+      if (url.indexOf('sb=') >= 0) {
+        try { const u = new URL(url); const sb = u.searchParams.get('sb'); const k = u.searchParams.get('k'); if (sb) url = sb; if (k) anon = k; } catch (e) {}
+      }
+      url = url.replace(/\/+$/, '');
+      if (!/^https:\/\/.+\.supabase\.co$/.test(url)) { toast('URL Supabase non valido'); return; }
+      if (anon.length < 20) { toast('Manca la chiave anon (o incolla il link completo)'); return; }
       Cloud.setConfig(url, anon); closeSheet(); toast('Cloud configurato ✓'); openLogin();
     };
   }
