@@ -452,13 +452,33 @@
         </div>
       </div>
 
+      ${cloudSectionHtml()}
+
       <div class="section-title">Backup</div>
       <div class="card">
         <div class="list-row" data-act="export"><div class="grow"><div class="title">Salva backup</div><div class="sub">Esporta tutti i dati in un file</div></div><span>⬇️</span></div>
         <div class="list-row" data-act="import"><div class="grow"><div class="title">Ripristina backup</div><div class="sub">Importa da un file salvato</div></div><span>⬆️</span></div>
       </div>
-      <p class="muted" style="text-align:center;font-size:12px;margin:20px 0 0">Turni Gelateria · i dati restano solo sul tuo telefono</p>
+      <p class="muted" style="text-align:center;font-size:12px;margin:20px 0 0">Turni Gelateria${cloudFooter()}</p>
     `;
+  }
+
+  function cloudSectionHtml() {
+    if (!window.Cloud) return '';
+    let inner;
+    if (Cloud.active()) {
+      inner = `<div class="list-row"><div class="grow"><div class="title">Account collegato</div><div class="sub">${esc(Cloud.email() || '')}</div></div><span>✅</span></div>
+        <div class="list-row" data-act="cloud-logout"><div class="grow"><div class="title">Esci da questo dispositivo</div><div class="sub">I dati restano sul cloud</div></div><span>🚪</span></div>`;
+    } else if (Cloud.configured()) {
+      inner = `<div class="list-row" data-act="cloud-login"><div class="grow"><div class="title">Accedi con email</div><div class="sub">Cloud configurato · manca solo il login</div></div><span>→</span></div>
+        <div class="list-row" data-act="cloud-config"><div class="grow"><div class="title">Cambia configurazione</div></div><span>⚙️</span></div>`;
+    } else {
+      inner = `<div class="list-row" data-act="cloud-config"><div class="grow"><div class="title">Attiva il cloud</div><div class="sub">Sync tra dispositivi + notifiche (in arrivo)</div></div><span>☁️</span></div>`;
+    }
+    return `<div class="section-title">Cloud e notifiche</div><div class="card">${inner}</div>`;
+  }
+  function cloudFooter() {
+    return (window.Cloud && Cloud.active()) ? ' · sincronizzata sul cloud ☁️' : ' · i dati restano sul tuo telefono';
   }
 
   function bindSettings() {
@@ -470,6 +490,9 @@
     act('import', importBackup);
     act('lock', toggleLock);
     act('theme', cycleTheme);
+    act('cloud-config', openCloudConfig);
+    act('cloud-login', openLogin);
+    act('cloud-logout', () => { if (confirm('Uscire dall\'account su questo dispositivo? I dati restano salvati sul cloud e in locale.')) { Cloud.logout(); toast('Uscita fatta'); render(); } });
     $$('[data-locedit]').forEach((b) => b.onclick = () => editLocation(b.dataset.locedit));
     $$('[data-loccolor]').forEach((b) => b.onclick = () => editLocation(b.dataset.loccolor));
     $$('[data-locdel]').forEach((b) => b.onclick = () => {
@@ -629,19 +652,82 @@
     inp.click();
   }
 
+  /* ---------- Cloud: sincronizzazione ---------- */
+  async function syncFromCloud() {
+    if (!(window.Cloud && Cloud.active())) return;
+    const data = await Cloud.pullAll();
+    const cloudEmpty = !data.locations.length && !data.colleagues.length && !data.shifts.length && !data.settings;
+    const localHas = S.shifts().length || S.locations().length || S.colleagues().length;
+    if (cloudEmpty && localHas) {
+      toast('Carico i tuoi dati sul cloud…');
+      await Cloud.migrateFromLocal(S.get());
+    } else {
+      S.replaceFromCloud(data);
+    }
+    applyTheme();
+    render();
+  }
+
+  function openCloudConfig() {
+    openSheet(`<h2>Configura il cloud</h2><p class="sub">Incolla i due valori pubblici dal tuo progetto Supabase (Project Settings → API).</p>
+      <div class="field"><label>Project URL</label><input type="url" id="c-url" placeholder="https://xxxx.supabase.co" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label>anon public key</label><textarea id="c-anon" placeholder="eyJhbGciOi..." style="min-height:80px" autocapitalize="none" spellcheck="false"></textarea></div>
+      <button class="btn" id="c-save">Salva e accedi</button>`);
+    $('#c-save').onclick = () => {
+      const url = $('#c-url').value.trim(), anon = $('#c-anon').value.trim();
+      if (!/^https:\/\/.+\.supabase\.co\/?$/.test(url)) { toast('URL Supabase non valido'); return; }
+      if (anon.length < 20) { toast('Chiave anon non valida'); return; }
+      Cloud.setConfig(url, anon); closeSheet(); toast('Cloud configurato ✓'); openLogin();
+    };
+  }
+
+  function openLogin() {
+    openSheet(`<h2>Accedi</h2><p class="sub">Ti mando un link via email: aprilo da questo telefono e sei dentro. Nessuna password.</p>
+      <div class="field"><label>La tua email</label><input type="email" id="c-email" placeholder="nome@email.com" autocomplete="email" autocapitalize="none" spellcheck="false"></div>
+      <button class="btn" id="c-send">Mandami il link</button>`);
+    $('#c-email').focus();
+    $('#c-send').onclick = async () => {
+      const mail = $('#c-email').value.trim();
+      if (!/.+@.+\..+/.test(mail)) { toast('Email non valida'); return; }
+      const btn = $('#c-send'); btn.textContent = 'Invio…'; btn.disabled = true;
+      try {
+        await Cloud.sendMagicLink(mail);
+        openSheet(`<h2>📧 Controlla la mail</h2><p class="sub">Ho mandato un link a <b>${esc(mail)}</b>.</p>
+          <p>Aprilo <b>da questo telefono</b> (stessa app) per entrare. Poi torna qui: i tuoi turni si sincronizzano da soli.</p>
+          <button class="btn" id="c-ok">Ok</button>`);
+        $('#c-ok').onclick = closeSheet;
+      } catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Mandami il link'; btn.disabled = false; }
+    };
+  }
+
   /* ================= AVVIO ================= */
-  function boot() {
+  async function boot() {
     applyTheme();
     $$('.tab').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
     $('#btn-today').onclick = () => { calCursor = new Date(); render(); };
+
+    // Ritorno dal link email: cattura la sessione
+    let justLoggedIn = false;
+    if (window.Cloud) justLoggedIn = Cloud.captureRedirect();
+
     setTab('home');
     $$('.tab')[0].classList.add('active');
-    if (S.settings().lockEnabled) showLock();
+    if (S.settings().lockEnabled && !justLoggedIn) showLock();
     else { $('#app').classList.remove('hidden'); }
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW non registrato', e));
     }
+
+    // Sincronizza col cloud se già collegata
+    if (window.Cloud && Cloud.configured() && Cloud.loggedIn()) {
+      try { await Cloud.loadUser(); await syncFromCloud(); if (justLoggedIn) toast('Collegata ✓'); }
+      catch (e) { console.warn('sync iniziale', e); }
+    }
+
+    // Deep link dalla notifica di fine turno: apri direttamente il turno da chiudere
+    const finishId = new URLSearchParams(location.search).get('finish');
+    if (finishId && S.getShift(finishId)) openShiftSheet(finishId);
   }
   boot();
 })();

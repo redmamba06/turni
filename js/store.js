@@ -159,6 +159,19 @@
     return state.shifts.filter((s) => s.date >= from && s.date <= to);
   }
 
+  /* ---------- Cloud (opzionale) ---------- */
+  // Ritorna il modulo Cloud solo se configurato + login fatto, altrimenti null.
+  function C() { return (global.Cloud && global.Cloud.active && global.Cloud.active()) ? global.Cloud : null; }
+  function cloudTry(fn) { const c = C(); if (c) { try { const p = fn(c); if (p && p.catch) p.catch((e) => console.warn('cloud sync', e)); } catch (e) { console.warn('cloud sync', e); } } }
+  // Sostituisce lo stato con i dati arrivati dal cloud (NON ri-sincronizza).
+  function replaceFromCloud(data) {
+    if (data.settings) Object.assign(state.settings, data.settings);
+    if (data.locations) state.locations = data.locations;
+    if (data.colleagues) state.colleagues = data.colleagues;
+    if (data.shifts) state.shifts = data.shifts.map(normalizeShift);
+    save();
+  }
+
   /* ---------- CRUD ---------- */
   function upsertShift(data) {
     const s = normalizeShift(data);
@@ -166,37 +179,49 @@
     const i = state.shifts.findIndex((x) => x.id === s.id);
     if (i >= 0) state.shifts[i] = s; else state.shifts.push(s);
     save();
+    cloudTry((c) => c.pushShift(s));
     return s;
   }
-  function deleteShift(id) { state.shifts = state.shifts.filter((s) => s.id !== id); save(); }
+  function deleteShift(id) { state.shifts = state.shifts.filter((s) => s.id !== id); save(); cloudTry((c) => c.removeShift(id)); }
   function getShift(id) { return state.shifts.find((s) => s.id === id) || null; }
 
   function addLocation(name, color) {
     const loc = { id: uid(), name: name.trim(), color: color || PALETTE[state.locations.length % PALETTE.length] };
-    state.locations.push(loc); save(); return loc;
+    state.locations.push(loc); save(); cloudTry((c) => c.pushLocation(loc)); return loc;
   }
   function updateLocation(id, patch) {
     const l = state.locations.find((x) => x.id === id); if (l) Object.assign(l, patch); save();
+    if (l) cloudTry((c) => c.pushLocation(l));
   }
   function deleteLocation(id) {
     state.locations = state.locations.filter((l) => l.id !== id);
-    state.shifts.forEach((s) => { if (s.locationId === id) s.locationId = null; });
+    const touched = state.shifts.filter((s) => s.locationId === id);
+    touched.forEach((s) => { s.locationId = null; });
     save();
+    cloudTry((c) => c.removeLocation(id));
+    touched.forEach((s) => cloudTry((c) => c.pushShift(s)));
   }
   function getLocation(id) { return state.locations.find((l) => l.id === id) || null; }
 
   function addColleague(name) {
-    const c = { id: uid(), name: name.trim() }; state.colleagues.push(c); save(); return c;
+    const c = { id: uid(), name: name.trim() }; state.colleagues.push(c); save(); cloudTry((cl) => cl.pushColleague(c)); return c;
   }
-  function updateColleague(id, patch) { const c = state.colleagues.find((x) => x.id === id); if (c) Object.assign(c, patch); save(); }
+  function updateColleague(id, patch) { const c = state.colleagues.find((x) => x.id === id); if (c) Object.assign(c, patch); save(); if (c) cloudTry((cl) => cl.pushColleague(c)); }
   function deleteColleague(id) {
     state.colleagues = state.colleagues.filter((c) => c.id !== id);
-    state.shifts.forEach((s) => { s.colleagueIds = s.colleagueIds.filter((x) => x !== id); });
+    const touched = state.shifts.filter((s) => s.colleagueIds.includes(id));
+    touched.forEach((s) => { s.colleagueIds = s.colleagueIds.filter((x) => x !== id); });
     save();
+    cloudTry((c) => c.removeColleague(id));
+    touched.forEach((s) => cloudTry((c) => c.pushShift(s)));
   }
   function getColleague(id) { return state.colleagues.find((c) => c.id === id) || null; }
 
-  function updateSettings(patch) { Object.assign(state.settings, patch); save(); }
+  function updateSettings(patch) {
+    Object.assign(state.settings, patch); save();
+    // Sincronizza solo i campi rilevanti (non il PIN, che resta locale)
+    if ('hourlyPay' in patch || 'weekStartsMonday' in patch || 'theme' in patch) cloudTry((c) => c.pushSettings(state.settings));
+  }
 
   /* ---------- PIN (hash locale) ---------- */
   async function sha256(str) {
@@ -297,5 +322,7 @@
     setPin, verifyPin, clearPin,
     // backup / calendario
     exportData, importData, exportIcs,
+    // cloud
+    replaceFromCloud,
   };
 })(window);
