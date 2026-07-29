@@ -160,7 +160,13 @@ input, select, textarea { font-family: inherit; font-size: 16px; }
   animation: slideUp .25s ease;
 }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.sheet-grip { width: 40px; height: 4px; border-radius: 4px; background: var(--line); margin: 8px auto 14px; }
+.sheet { position: relative; }
+.sheet-grip { display: block; width: 44px; height: 5px; border-radius: 4px; background: var(--line); margin: 10px auto 14px; padding: 0; cursor: pointer; }
+.sheet-close {
+  position: absolute; top: 14px; right: 16px; z-index: 2;
+  width: 34px; height: 34px; border-radius: 50%; background: var(--bg); color: var(--muted);
+  font-size: 16px; font-weight: 700; display: grid; place-items: center; line-height: 1;
+}
 .sheet h2 { margin: 0 0 4px; font-size: 22px; font-weight: 800; }
 .sheet .sub { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
 

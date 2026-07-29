@@ -31,8 +31,10 @@
 
   /* ---------- Sheet ---------- */
   function openSheet(html) {
-    $('#sheet-body').innerHTML = '<div class="sheet-grip"></div>' + html;
+    $('#sheet-body').innerHTML = '<button class="sheet-close" id="sheet-close" aria-label="Chiudi">✕</button><button class="sheet-grip" id="sheet-grip" aria-label="Chiudi"></button>' + html;
     $('#sheet').classList.remove('hidden');
+    $('#sheet-close').onclick = closeSheet;
+    $('#sheet-grip').onclick = closeSheet;
     return $('#sheet-body');
   }
   function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheet-body').innerHTML = ''; }
@@ -257,7 +259,7 @@
       <div class="hint" id="f-calc"></div>`;
 
     const bulk = `
-      <div class="field"><label>Ore totali</label><input type="number" id="f-hours" min="0" step="0.5" value="${f.hours || ''}" placeholder="es. 40"></div>
+      <div class="field"><label>Ore totali</label><input type="text" id="f-hours" inputmode="decimal" autocomplete="off" value="${f.hours ? String(f.hours).replace('.', ',') : ''}" placeholder="es. 40"></div>
       <div class="field"><label>Etichetta (facoltativo)</label><input type="text" id="f-label" value="${esc(f.label)}" placeholder="es. Settimana 12–18 maggio"></div>
       <div class="hint">Usa la data qui sopra per far rientrare le ore nella settimana/mese giusto. Comodo per inserire in fretta il passato.</div>`;
 
@@ -289,7 +291,7 @@
       f.start = $('#f-start').value; f.end = $('#f-end').value;
       f.breakMin = Number($('#f-break').value) || 0; f.hours = null;
     } else {
-      f.hours = Number($('#f-hours').value) || 0; f.label = $('#f-label').value.trim();
+      f.hours = Number(String($('#f-hours').value).replace(',', '.')) || 0; f.label = $('#f-label').value.trim();
       f.start = null; f.end = null;
     }
     const note = $('#f-note'); if (note) f.note = note.value.trim();
@@ -492,7 +494,7 @@
 
   function editHourlyPay() {
     openSheet(`<h2>Paga oraria</h2><p class="sub">Quanto guadagni all'ora, al lordo o netto — decidi tu.</p>
-      <div class="field"><label>Euro all'ora</label><input type="number" id="pay" min="0" step="0.5" value="${S.settings().hourlyPay || ''}" placeholder="es. 8,50" inputmode="decimal"></div>
+      <div class="field"><label>Euro all'ora</label><input type="text" id="pay" value="${S.settings().hourlyPay ? String(S.settings().hourlyPay).replace('.', ',') : ''}" placeholder="es. 8,50" inputmode="decimal" autocomplete="off"></div>
       <button class="btn" id="pay-save">Salva</button>`);
     const inp = $('#pay'); inp.focus();
     $('#pay-save').onclick = () => {
