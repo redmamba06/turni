@@ -682,22 +682,36 @@
   }
 
   function openLogin() {
-    openSheet(`<h2>Accedi</h2><p class="sub">Ti mando un link via email: aprilo da questo telefono e sei dentro. Nessuna password.</p>
+    openSheet(`<h2>Accedi</h2><p class="sub">Ti mando un codice via email. Nessuna password da ricordare.</p>
       <div class="field"><label>La tua email</label><input type="email" id="c-email" placeholder="nome@email.com" autocomplete="email" autocapitalize="none" spellcheck="false"></div>
-      <button class="btn" id="c-send">Mandami il link</button>`);
+      <button class="btn" id="c-send">Mandami il codice</button>`);
     $('#c-email').focus();
     $('#c-send').onclick = async () => {
       const mail = $('#c-email').value.trim();
       if (!/.+@.+\..+/.test(mail)) { toast('Email non valida'); return; }
       const btn = $('#c-send'); btn.textContent = 'Invio…'; btn.disabled = true;
-      try {
-        await Cloud.sendMagicLink(mail);
-        openSheet(`<h2>📧 Controlla la mail</h2><p class="sub">Ho mandato un link a <b>${esc(mail)}</b>.</p>
-          <p>Aprilo <b>da questo telefono</b> (stessa app) per entrare. Poi torna qui: i tuoi turni si sincronizzano da soli.</p>
-          <button class="btn" id="c-ok">Ok</button>`);
-        $('#c-ok').onclick = closeSheet;
-      } catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Mandami il link'; btn.disabled = false; }
+      try { await Cloud.sendMagicLink(mail); askCode(mail); }
+      catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Mandami il codice'; btn.disabled = false; }
     };
+  }
+
+  function askCode(mail) {
+    openSheet(`<h2>📧 Inserisci il codice</h2><p class="sub">Ho mandato un codice a <b>${esc(mail)}</b>. Controlla la mail (anche lo spam) e scrivilo qui.</p>
+      <div class="field"><label>Codice a 6 cifre</label><input type="text" id="c-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" style="font-size:22px;letter-spacing:4px;text-align:center"></div>
+      <button class="btn" id="c-verify">Entra</button>
+      <button class="btn secondary" id="c-resend">Rimanda il codice</button>`);
+    $('#c-code').focus();
+    $('#c-verify').onclick = async () => {
+      const code = $('#c-code').value.trim();
+      if (!/^\d{6,8}$/.test(code)) { toast('Codice non valido'); return; }
+      const btn = $('#c-verify'); btn.textContent = 'Verifico…'; btn.disabled = true;
+      try {
+        await Cloud.verifyCode(mail, code);
+        closeSheet(); toast('Collegata ✓');
+        await syncFromCloud();
+      } catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Entra'; btn.disabled = false; }
+    };
+    $('#c-resend').onclick = async () => { try { await Cloud.sendMagicLink(mail); toast('Codice rimandato'); } catch (e) { toast('Errore: ' + e.message); } };
   }
 
   /* ================= AVVIO ================= */

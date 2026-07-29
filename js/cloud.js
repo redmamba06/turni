@@ -40,6 +40,20 @@
     return true;
   }
 
+  // Verifica il codice a 6 cifre ricevuto via email (login senza link)
+  async function verifyCode(mail, token) {
+    const r = await fetch(cfg.url + '/auth/v1/verify', {
+      method: 'POST', headers: headers(false),
+      body: JSON.stringify({ type: 'email', email: (mail || '').trim(), token: (token || '').trim() }),
+    });
+    if (!r.ok) { let m = 'Codice non valido'; try { m = (await r.json()).msg || (await r.json()).error_description || m; } catch (e) {} throw new Error(m); }
+    const d = await r.json();
+    sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (d.expires_in || 3600) * 1000 };
+    write(SESS, sess);
+    if (d.user) me = { id: d.user.id, email: d.user.email };
+    return me || (await loadUser());
+  }
+
   // Cattura i token dall'URL dopo il click sul link email (#access_token=...)
   function captureRedirect() {
     if (!location.hash || location.hash.indexOf('access_token') < 0) return false;
@@ -157,7 +171,7 @@
 
   global.Cloud = {
     configured, loggedIn, active, email, userId, tz,
-    setConfig, clearConfig, sendMagicLink, captureRedirect, loadUser, logout,
+    setConfig, clearConfig, sendMagicLink, verifyCode, captureRedirect, loadUser, logout,
     pullAll, migrateFromLocal,
     pushShift, removeShift, pushLocation, removeLocation, pushColleague, removeColleague, pushSettings,
   };
