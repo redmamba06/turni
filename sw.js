@@ -1,5 +1,5 @@
 /* Service worker: cache offline dell'app (app shell). I dati stanno in localStorage. */
-const CACHE = 'turni-v2';
+const CACHE = 'turni-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -36,4 +36,32 @@ self.addEventListener('fetch', (e) => {
       return res;
     }).catch(() => caches.match(req).then((r) => r || caches.match('./index.html')))
   );
+});
+
+/* ---------- Notifiche push ---------- */
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (_) { data = { title: 'Turni Gelateria', body: e.data ? e.data.text() : '' }; }
+  const title = data.title || 'Turni Gelateria';
+  const options = {
+    body: data.body || '',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    data: { url: data.url || './' },
+    tag: data.tag || 'turno',
+    requireInteraction: false,
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) {
+      if ('focus' in c) { await c.focus(); if ('navigate' in c) { try { await c.navigate(url); } catch (_) {} } return; }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(url);
+  })());
 });

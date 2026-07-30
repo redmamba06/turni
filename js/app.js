@@ -477,7 +477,15 @@
     if (!window.Cloud) return '';
     let inner;
     if (Cloud.active()) {
+      const ps = pushState();
+      let notif;
+      if (ps === 'on') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attive · ti avviso quando finisce il turno</div></div><div class="toggle on" data-act="push-off"></div></div>
+        <div class="list-row" data-act="push-test"><div class="grow"><div class="title">Invia una notifica di prova</div><div class="sub">Per controllare che arrivino</div></div><span>🔔</span></div>`;
+      else if (ps === 'denied') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Bloccate: attivale dalle impostazioni del telefono per quest'app</div></div><span>🔕</span></div>`;
+      else if (ps === 'unsupported') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Su iPhone: installa l'app sulla Home per riceverle</div></div><span>📲</span></div>`;
+      else notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attivale per essere avvisata</div></div><div class="toggle" data-act="push-on"></div></div>`;
       inner = `<div class="list-row"><div class="grow"><div class="title">Account collegato</div><div class="sub">${esc(Cloud.email() || '')}</div></div><span>✅</span></div>
+        ${notif}
         <div class="list-row" data-act="cloud-logout"><div class="grow"><div class="title">Esci da questo dispositivo</div><div class="sub">I dati restano sul cloud</div></div><span>🚪</span></div>`;
     } else if (Cloud.configured()) {
       inner = `<div class="list-row" data-act="cloud-login"><div class="grow"><div class="title">Accedi con email</div><div class="sub">Cloud configurato · manca solo il login</div></div><span>→</span></div>
@@ -503,6 +511,9 @@
     act('cloud-config', openCloudConfig);
     act('cloud-login', openLogin);
     act('cloud-logout', () => { if (confirm('Uscire dall\'account su questo dispositivo? I dati restano salvati sul cloud e in locale.')) { Cloud.logout(); toast('Uscita fatta'); render(); } });
+    act('push-on', enablePush);
+    act('push-off', disablePush);
+    act('push-test', sendTestPush);
     $$('[data-locedit]').forEach((b) => b.onclick = () => editLocation(b.dataset.locedit));
     $$('[data-loccolor]').forEach((b) => b.onclick = () => editLocation(b.dataset.loccolor));
     $$('[data-locdel]').forEach((b) => b.onclick = () => {
@@ -660,6 +671,50 @@
       reader.readAsText(file);
     };
     inp.click();
+  }
+
+  /* ---------- Notifiche push ---------- */
+  const VAPID_PUBLIC = 'BA33YfzuTPUrnGxSGX4sdkHECx6o5jpOOZS8gLxty9Sw_3-M5-O0S1toUBkoNJlLrlkVh-uOsDtzvShHHUF2rNo';
+  function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function urlB64ToUint8(base64) {
+    const pad = '='.repeat((4 - base64.length % 4) % 4);
+    const raw = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(Array.prototype.map.call(raw, (c) => c.charCodeAt(0)));
+  }
+  async function enablePush() {
+    if (!(window.Cloud && Cloud.active())) { toast('Prima collega il cloud e accedi'); return; }
+    if (!pushSupported()) { toast('Notifiche non supportate qui. Su iPhone installa l\'app sulla Home.'); return; }
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { toast('Permesso notifiche negato'); return; }
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(VAPID_PUBLIC) });
+      await Cloud.saveSubscription(sub);
+      toast('Notifiche attivate ✓'); render();
+    } catch (e) { toast('Errore notifiche: ' + e.message); console.warn(e); }
+  }
+  async function disablePush() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) { try { await Cloud.deleteSubscription(sub.endpoint); } catch (e) {} await sub.unsubscribe(); }
+      toast('Notifiche disattivate'); render();
+    } catch (e) { toast('Errore: ' + e.message); }
+  }
+  async function sendTestPush() {
+    try {
+      toast('Invio…');
+      const r = await Cloud.invokeFunction('send-reminders', { test: true });
+      if (r.ok) toast('Prova inviata 🔔 (arriva tra pochi secondi)');
+      else toast('Errore prova: ' + (await r.text()).slice(0, 80));
+    } catch (e) { toast('Errore: ' + e.message); }
+  }
+  function pushState() {
+    if (!pushSupported()) return 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    if (Notification.permission === 'granted') return 'on';
+    return 'off';
   }
 
   /* ---------- Cloud: sincronizzazione ---------- */

@@ -169,10 +169,28 @@
   const removeColleague = (id) => removeRow('colleagues', id);
   const pushSettings = (st) => upsert('settings', settingsToDb(st));
 
+  // Iscrizioni push
+  async function saveSubscription(sub) {
+    const j = sub.toJSON ? sub.toJSON() : sub;
+    const row = { user_id: userId(), endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, tz: tz() };
+    const r = await rest('push_subscriptions?on_conflict=user_id,endpoint', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
+    if (!r.ok) throw new Error('sub save: ' + await r.text());
+  }
+  async function deleteSubscription(endpoint) {
+    const r = await rest('push_subscriptions?endpoint=eq.' + encodeURIComponent(endpoint), { method: 'DELETE' });
+    if (!r.ok) throw new Error('sub del: ' + await r.text());
+  }
+  // Invoca una Edge Function (con il token dell'utente)
+  async function invokeFunction(slug, body) {
+    await ensureFresh();
+    return fetch(cfg.url + '/functions/v1/' + slug, { method: 'POST', headers: headers(true), body: JSON.stringify(body || {}) });
+  }
+
   global.Cloud = {
     configured, loggedIn, active, email, userId, tz,
     setConfig, clearConfig, sendMagicLink, verifyCode, captureRedirect, loadUser, logout,
     pullAll, migrateFromLocal,
     pushShift, removeShift, pushLocation, removeLocation, pushColleague, removeColleague, pushSettings,
+    saveSubscription, deleteSubscription, invokeFunction,
   };
 })(window);
