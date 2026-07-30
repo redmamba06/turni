@@ -144,6 +144,8 @@ input, select, textarea { font-family: inherit; font-size: 16px; }
 }
 .cal-day.other { opacity: .35; }
 .cal-day.today { outline: 2px solid var(--blue); }
+.cal-day.selected { background: var(--blue); color: #fff; box-shadow: 0 6px 16px rgba(37, 99, 235, .45); transform: scale(1.04); outline: none; }
+.cal-day.selected .hrs { color: rgba(255, 255, 255, .9); }
 .cal-day .n { line-height: 1; }
 .cal-day .dots { display: flex; gap: 2px; margin-top: 4px; flex-wrap: wrap; justify-content: center; max-width: 90%; }
 .cal-day .dots i { width: 6px; height: 6px; border-radius: 50%; display: block; }
@@ -247,3 +249,25 @@ input, select, textarea { font-family: inherit; font-size: 16px; }
 }
 :root[data-theme="dark"] .toast { background: #1E293B; }
 @keyframes pop { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---------- Report di stampa (PDF del mese) ---------- */
+#print-report { display: none; }
+@media print {
+  body * { visibility: hidden !important; }
+  #print-report, #print-report * { visibility: visible !important; }
+  #print-report { display: block !important; position: absolute; inset: 0; padding: 0; margin: 0; color: #000; background: #fff; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  .tabbar, .topbar, #sheet, #lock, #toast, #app { background: #fff !important; }
+  .tabbar, #sheet, #lock, #toast { display: none !important; }
+  @page { margin: 14mm; }
+}
+#print-report .pr-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #2563EB; padding-bottom: 10px; margin-bottom: 14px; }
+#print-report .pr-title { font-size: 22px; font-weight: 800; }
+#print-report .pr-sub { color: #555; font-size: 12px; }
+#print-report .pr-tot-n { font-size: 24px; font-weight: 800; color: #16A34A; text-align: right; }
+#print-report .pr-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px; }
+#print-report .pr-table th, #print-report .pr-table td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #ddd; }
+#print-report .pr-table thead th { background: #EFF4FF; color: #2563EB; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+#print-report .pr-table tfoot th { border-top: 2px solid #2563EB; font-size: 13px; background: #EFF4FF; }
+#print-report .pr-table .r { text-align: right; white-space: nowrap; }
+#print-report .pr-sub2 { font-weight: 700; margin: 4px 0 6px; font-size: 13px; }
+#print-report .pr-foot { color: #888; font-size: 11px; margin-top: 10px; }

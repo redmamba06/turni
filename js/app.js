@@ -50,6 +50,7 @@
   /* ================= ROUTER ================= */
   let currentTab = 'home';
   let calCursor = new Date();
+  let calSelected = null;
 
   function setTab(tab) {
     if (tab === 'add') { openShiftSheet(null); return; }
@@ -184,10 +185,13 @@
       <div class="cal-nav"><button data-cal="-1">‹</button><button data-cal="1">›</button></div>
     </div>
     <div class="cal-grid">${DOW.map((d) => `<div class="cal-dow">${d}</div>`).join('')}${cells}</div>
-    <div class="card" style="margin-top:16px"><div class="shift-top">
-      <div><b>${MONTHS[m]}</b><div class="muted" style="font-size:13px">${fmtHours(mo.hours)} · ${turniLabel(mo.count)}</div></div>
-      <div class="shift-pay" style="font-size:20px">${euro(mo.earnings)}</div>
-    </div></div>
+    <div class="card" style="margin-top:16px">
+      <div class="shift-top">
+        <div><b>${MONTHS[m]}</b><div class="muted" style="font-size:13px">${fmtHours(mo.hours)} · ${turniLabel(mo.count)}</div></div>
+        <div class="shift-pay" style="font-size:20px">${euro(mo.earnings)}</div>
+      </div>
+      ${mo.count ? '<button class="btn secondary" id="cal-pdf" style="margin-top:14px">📄 Esporta il mese in PDF</button>' : ''}
+    </div>
     <div id="cal-day-list"></div>`;
   }
   function dayCell(d, other, byDate) {
@@ -199,15 +203,21 @@
       return `<i style="background:${loc ? loc.color : 'var(--blue)'}"></i>`;
     }).join('');
     const totH = list.reduce((a, s) => a + S.shiftHours(s), 0);
-    return `<div class="cal-day${other ? ' other' : ''}${isToday ? ' today' : ''}" data-date="${ds}">
+    const isSel = ds === calSelected;
+    return `<div class="cal-day${other ? ' other' : ''}${isToday ? ' today' : ''}${isSel ? ' selected' : ''}" data-date="${ds}">
       <span class="n">${d.getDate()}</span>
       <div class="dots">${dots}</div>
       ${totH ? `<span class="hrs">${fmtHours(totH)}</span>` : ''}
     </div>`;
   }
   function bindCalendar() {
-    $$('[data-cal]').forEach((b) => b.onclick = () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + Number(b.dataset.cal), 1); render(); });
-    $$('.cal-day').forEach((c) => c.onclick = () => showDay(c.dataset.date));
+    $$('[data-cal]').forEach((b) => b.onclick = () => { calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + Number(b.dataset.cal), 1); calSelected = null; render(); });
+    $$('.cal-day').forEach((c) => c.onclick = () => {
+      calSelected = c.dataset.date;
+      $$('.cal-day').forEach((x) => x.classList.toggle('selected', x.dataset.date === calSelected));
+      showDay(c.dataset.date);
+    });
+    const pdf = $('#cal-pdf'); if (pdf) pdf.onclick = exportMonthPdf;
   }
   function showDay(ds) {
     const d = S.parseYmd(ds);
@@ -717,6 +727,54 @@
       } catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Entra'; btn.disabled = false; }
     };
     $('#c-resend').onclick = async () => { try { await Cloud.sendMagicLink(mail); toast('Codice rimandato'); } catch (e) { toast('Errore: ' + e.message); } };
+  }
+
+  /* ---------- Export PDF del mese (via stampa) ---------- */
+  function exportMonthPdf() {
+    const y = calCursor.getFullYear(), m = calCursor.getMonth();
+    const pay = S.settings().hourlyPay;
+    const list = S.shiftsInMonth(y, m).slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
+    const mo = S.summaryMonth(calCursor);
+    const byLoc = S.hoursByLocation(S.startOfMonth(calCursor), S.endOfMonth(calCursor));
+
+    const rows = list.map((s) => {
+      const loc = S.getLocation(s.locationId);
+      const cols = s.colleagueIds.map((id) => (S.getColleague(id) || {}).name).filter(Boolean);
+      const d = S.parseYmd(s.date);
+      const dn = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate();
+      const when = s.type === 'bulk' ? (s.label || 'Ore inserite') : ((s.start || '--') + '–' + (s.end || '--'));
+      const stars = s.rating ? ' ' + '★'.repeat(s.rating) : '';
+      return `<tr>
+        <td>${dn}</td><td>${esc(when)}</td><td>${loc ? esc(loc.name) : '—'}</td>
+        <td>${esc(cols.join(', ') || '—')}${stars}</td>
+        <td class="r">${fmtHours(S.shiftHours(s))}</td><td class="r">${euro(S.shiftEarnings(s))}</td>
+      </tr>`;
+    }).join('');
+
+    const locRows = Object.keys(byLoc).sort((a, b) => byLoc[b].hours - byLoc[a].hours).map((k) => {
+      const loc = S.getLocation(k);
+      return `<tr><td colspan="4">${loc ? esc(loc.name) : 'Senza sede'}</td><td class="r">${fmtHours(byLoc[k].hours)}</td><td class="r">${euro(byLoc[k].earnings)}</td></tr>`;
+    }).join('');
+
+    const now = new Date();
+    const el = document.createElement('div');
+    el.id = 'print-report';
+    el.innerHTML = `
+      <div class="pr-head">
+        <div><div class="pr-title">Turni Gelateria 🍦</div><div class="pr-sub">${MONTHS[m]} ${y}</div></div>
+        <div class="pr-tot"><div class="pr-tot-n">${euro(mo.earnings)}</div><div class="pr-sub">${fmtHours(mo.hours)} · ${turniLabel(mo.count)}</div></div>
+      </div>
+      <table class="pr-table">
+        <thead><tr><th>Giorno</th><th>Orario</th><th>Sede</th><th>Con chi / voto</th><th class="r">Ore</th><th class="r">Guadagno</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6">Nessun turno questo mese.</td></tr>'}</tbody>
+        <tfoot><tr><th colspan="4">TOTALE</th><th class="r">${fmtHours(mo.hours)}</th><th class="r">${euro(mo.earnings)}</th></tr></tfoot>
+      </table>
+      ${locRows ? `<div class="pr-sub2">Riepilogo per sede</div><table class="pr-table"><tbody>${locRows}</tbody></table>` : ''}
+      <div class="pr-foot">Paga oraria: ${euro(pay)}/h · Generato il ${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}</div>`;
+    document.body.appendChild(el);
+    const cleanup = () => { el.remove(); window.removeEventListener('afterprint', cleanup); };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(() => { window.print(); setTimeout(cleanup, 1500); }, 60);
   }
 
   /* ================= AVVIO ================= */
