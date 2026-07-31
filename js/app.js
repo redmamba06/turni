@@ -299,7 +299,7 @@
       </div>
       <div class="field"><label>Ore totali nel periodo</label><input type="text" id="f-hours" inputmode="decimal" autocomplete="off" value="${f.hours ? String(f.hours).replace('.', ',') : ''}" placeholder="es. 40"></div>
       <div class="field"><label>Etichetta (facoltativo)</label><input type="text" id="f-label" value="${esc(f.label)}" placeholder="es. Prima settimana di maggio"></div>
-      <div class="hint">Le ore vengono conteggiate nel mese della data <b>"Dal"</b>. Comodo per inserire in fretta i periodi passati.</div>`;
+      <div class="hint">Le ore vengono <b>distribuite equamente</b> sui giorni del periodo, così le vedi spalmate nel calendario. Comodo per inserire in fretta i periodi passati.</div>`;
 
     openSheet(`
       <h2>${f.id ? 'Modifica turno' : 'Nuovo turno'}</h2>
@@ -367,12 +367,39 @@
     };
   }
 
+  function daysBetweenInclusive(a, b) {
+    return Math.round((S.parseYmd(b) - S.parseYmd(a)) / 86400000) + 1;
+  }
   function saveForm() {
     readForm();
     const f = formState;
     if (f.type === 'shift') {
       if (!f.start || !f.end) { toast('Inserisci inizio e fine'); return; }
     } else if (!f.hours || f.hours <= 0) { toast('Inserisci le ore totali'); return; }
+
+    // Ore totali su un intervallo → distribuisci equamente sui giorni (un record per giorno)
+    if (f.type === 'bulk' && !f.id && f.dateTo && f.dateTo !== f.date) {
+      if (f.dateTo < f.date) { toast('La data "Al" deve venire dopo "Dal"'); return; }
+      const days = daysBetweenInclusive(f.date, f.dateTo);
+      const totalMin = Math.round(f.hours * 60);
+      const base = Math.floor(totalMin / days);
+      const rem = totalMin - base * days; // i primi "rem" giorni ricevono 1 minuto in più
+      const cur = S.parseYmd(f.date);
+      for (let i = 0; i < days; i++) {
+        const mins = base + (i < rem ? 1 : 0);
+        S.upsertShift({
+          type: 'bulk', date: S.ymd(cur), dateTo: null, hours: mins / 60,
+          label: f.label, locationId: f.locationId, colleagueIds: f.colleagueIds.slice(),
+          rating: f.rating, note: f.note,
+        });
+        cur.setDate(cur.getDate() + 1);
+      }
+      closeSheet();
+      toast(`${fmtHours(f.hours)} distribuite su ${days} giorni ✓`);
+      render();
+      return;
+    }
+
     S.upsertShift(f);
     closeSheet();
     toast(f.id ? 'Turno aggiornato' : 'Turno salvato ✓');
@@ -920,7 +947,13 @@
     $$('.tab')[0].classList.add('active');
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW non registrato', e));
+      // Aggiornamento automatico: quando una nuova versione prende il controllo, ricarica
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading || !hadController) return; reloading = true; location.reload();
+      });
+      navigator.serviceWorker.register('sw.js').then((reg) => { try { reg.update(); } catch (e) {} }).catch((e) => console.warn('SW non registrato', e));
       // La notifica cliccata apre direttamente il turno (anche ad app già aperta)
       navigator.serviceWorker.addEventListener('message', (e) => {
         if (e.data && e.data.type === 'finish' && e.data.id) { const s = S.getShift(e.data.id); if (s) openShiftSheet(e.data.id); }
