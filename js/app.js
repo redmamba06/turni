@@ -86,7 +86,7 @@
 
     if (!pay) {
       html += `<div class="card" style="border:1.5px dashed var(--blue)">
-        <b>👋 Benvenuta!</b><p class="muted" style="margin:6px 0 12px">Imposta la tua paga oraria per vedere subito quanto guadagni.</p>
+        <b>👋 Ciao!</b><p class="muted" style="margin:6px 0 12px">Imposta la tua paga oraria per vedere subito quanto guadagni.</p>
         <button class="btn" data-go="pay">Imposta paga oraria</button></div>`;
     }
 
@@ -846,7 +846,7 @@
     $('#app').classList.remove('hidden');
     try { await syncFromCloud(); } catch (e) { console.warn(e); }
     render();
-    toast('Benvenuta' + (Cloud.firstName() ? ', ' + Cloud.firstName() : '') + '! 🍦');
+    toast('Ciao' + (Cloud.firstName() ? ', ' + Cloud.firstName() : '') + '! 🍦');
     if (!Cloud.name()) setTimeout(editNameFlow, 600);
   }
 
