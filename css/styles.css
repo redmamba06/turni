@@ -180,6 +180,10 @@ input, select, textarea { font-family: inherit; font-size: 16px; }
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--blue); }
 .field textarea { resize: vertical; min-height: 60px; }
+.tsel-row { display: flex; align-items: center; gap: 8px; }
+.tsel { flex: 1; padding: 13px 8px; border-radius: 13px; border: 1.5px solid var(--line); background: var(--bg); color: var(--text); outline: none; text-align: center; font-size: 17px; font-weight: 700; }
+.tsel:focus { border-color: var(--blue); }
+.tsel-sep { font-weight: 800; font-size: 18px; color: var(--muted); }
 .row-2 { display: flex; gap: 12px; }
 .row-2 .field { flex: 1; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }

@@ -240,6 +240,22 @@
   }
 
   /* ================= FORM TURNO / BULK ================= */
+  // Selettore orario a quarti d'ora (ora + 00/15/30/45)
+  function timeSelectHtml(idBase, val) {
+    const [h, m] = (val || '').split(':');
+    let mins = ['00', '15', '30', '45'];
+    if (m && !mins.includes(m)) mins = [m].concat(mins); // preserva orari "vecchi" non allineati
+    const hOpts = ['<option value="">--</option>'].concat(
+      Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hh) => `<option value="${hh}" ${hh === h ? 'selected' : ''}>${hh}</option>`)
+    ).join('');
+    const mOpts = mins.map((mm) => `<option value="${mm}" ${mm === m ? 'selected' : ''}>${mm}</option>`).join('');
+    return `<div class="tsel-row">
+      <select id="${idBase}-h" class="tsel">${hOpts}</select>
+      <span class="tsel-sep">:</span>
+      <select id="${idBase}-m" class="tsel">${mOpts}</select>
+    </div>`;
+  }
+
   let formState = null;
   function openShiftSheet(id, presetDate) {
     const existing = id ? S.getShift(id) : null;
@@ -270,8 +286,8 @@
     const single = `
       <div class="field"><label>Data</label><input type="date" id="f-date" value="${f.date}"></div>
       <div class="row-2">
-        <div class="field"><label>Inizio</label><input type="time" id="f-start" step="900" value="${f.start || ''}"></div>
-        <div class="field"><label>Fine</label><input type="time" id="f-end" step="900" value="${f.end || ''}"></div>
+        <div class="field"><label>Inizio</label>${timeSelectHtml('f-start', f.start)}</div>
+        <div class="field"><label>Fine</label>${timeSelectHtml('f-end', f.end)}</div>
       </div>
       <div class="field"><label>Pausa non pagata (minuti) — facoltativo</label><input type="number" id="f-break" min="0" step="15" value="${f.breakMin || ''}" placeholder="0"></div>
       <div class="hint" id="f-calc"></div>`;
@@ -309,7 +325,10 @@
     const f = formState;
     f.date = $('#f-date').value || todayStr();
     if (f.type === 'shift') {
-      f.start = $('#f-start').value; f.end = $('#f-end').value;
+      const sh = $('#f-start-h').value, sm = $('#f-start-m').value;
+      const eh = $('#f-end-h').value, em = $('#f-end-m').value;
+      f.start = sh ? sh + ':' + (sm || '00') : '';
+      f.end = eh ? eh + ':' + (em || '00') : '';
       f.breakMin = Number($('#f-break').value) || 0; f.hours = null; f.dateTo = null;
     } else {
       f.hours = Number(String($('#f-hours').value).replace(',', '.')) || 0; f.label = $('#f-label').value.trim();
@@ -340,7 +359,8 @@
       formState.rating = (formState.rating === n) ? null : n;
       $$('#f-stars .s').forEach((s) => s.classList.toggle('on', Number(s.dataset.star) <= (formState.rating || 0)));
     });
-    ['f-start', 'f-end', 'f-break'].forEach((id) => { const el = $('#' + id); if (el) el.oninput = updateCalc; });
+    ['f-start-h', 'f-start-m', 'f-end-h', 'f-end-m'].forEach((id) => { const el = $('#' + id); if (el) el.onchange = updateCalc; });
+    const br = $('#f-break'); if (br) br.oninput = updateCalc;
     $('#f-save').onclick = saveForm;
     const del = $('#f-del'); if (del) del.onclick = () => {
       if (confirm('Eliminare questo turno?')) { S.deleteShift(formState.id); closeSheet(); toast('Turno eliminato'); render(); }
