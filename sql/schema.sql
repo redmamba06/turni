@@ -35,7 +35,8 @@ create table if not exists public.shifts (
   id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   type text default 'shift',           -- 'shift' | 'bulk'
-  date date not null,
+  date date not null,                  -- (bulk: inizio periodo)
+  date_to date,                        -- (bulk: fine periodo)
   start text,                          -- 'HH:MM'
   "end" text,                          -- 'HH:MM'
   hours numeric,
@@ -64,7 +65,21 @@ create table if not exists public.push_subscriptions (
   unique (user_id, endpoint)
 );
 
+-- Profili (nome/cognome per utente; is_admin per future funzioni admin)
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  first_name text default '',
+  last_name text default '',
+  full_name text default '',
+  email text,
+  is_admin boolean default false,
+  created_at timestamptz default now()
+);
+
 -- ---------- Sicurezza: ognuno vede solo i propri dati ----------
+alter table public.profiles enable row level security;
+drop policy if exists "own profile" on public.profiles;
+create policy "own profile" on public.profiles for all using (auth.uid() = id) with check (auth.uid() = id);
 alter table public.settings           enable row level security;
 alter table public.locations          enable row level security;
 alter table public.colleagues         enable row level security;

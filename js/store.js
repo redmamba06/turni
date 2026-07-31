@@ -59,7 +59,8 @@
     return {
       id: s.id || uid(),
       type: s.type === 'bulk' ? 'bulk' : 'shift',
-      date: s.date,                       // YYYY-MM-DD (per bulk = data di riferimento/inizio periodo)
+      date: s.date,                       // YYYY-MM-DD (per bulk = inizio periodo)
+      dateTo: s.dateTo || null,           // YYYY-MM-DD (solo bulk: fine periodo)
       start: s.start || null,             // HH:MM
       end: s.end || null,                 // HH:MM
       hours: typeof s.hours === 'number' ? s.hours : null, // per bulk o override

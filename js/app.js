@@ -71,9 +71,10 @@
 
   function greeting() {
     const h = new Date().getHours();
-    if (h < 12) return 'Buongiorno ☀️';
-    if (h < 18) return 'Buon pomeriggio 🍦';
-    return 'Buonasera 🌙';
+    const fn = (window.Cloud && Cloud.firstName && Cloud.firstName()) ? ', ' + Cloud.firstName() : '';
+    if (h < 12) return 'Buongiorno' + fn + ' ☀️';
+    if (h < 18) return 'Buon pomeriggio' + fn + ' 🍦';
+    return 'Buonasera' + fn + ' 🌙';
   }
 
   /* ================= HOME / DASHBOARD ================= */
@@ -134,7 +135,13 @@
     const h = S.shiftHours(s);
     const cols = s.colleagueIds.map((id) => (S.getColleague(id) || {}).name).filter(Boolean);
     const d = S.parseYmd(s.date);
-    const dateLabel = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()].slice(0, 3);
+    let dateLabel;
+    if (s.type === 'bulk' && s.dateTo && s.dateTo !== s.date) {
+      const d2 = S.parseYmd(s.dateTo);
+      dateLabel = `${d.getDate()}/${d.getMonth() + 1} – ${d2.getDate()}/${d2.getMonth() + 1}`;
+    } else {
+      dateLabel = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()].slice(0, 3);
+    }
     let timeLabel;
     if (s.type === 'bulk') timeLabel = '📦 ' + (s.label || 'Ore inserite');
     else timeLabel = (s.start || '--:--') + ' → ' + (s.end || '--:--');
@@ -261,17 +268,22 @@
       : `<span class="muted" style="font-size:13px">Nessun collega. Aggiungili nelle Impostazioni.</span>`;
 
     const single = `
+      <div class="field"><label>Data</label><input type="date" id="f-date" value="${f.date}"></div>
       <div class="row-2">
-        <div class="field"><label>Inizio</label><input type="time" id="f-start" value="${f.start || ''}"></div>
-        <div class="field"><label>Fine</label><input type="time" id="f-end" value="${f.end || ''}"></div>
+        <div class="field"><label>Inizio</label><input type="time" id="f-start" step="900" value="${f.start || ''}"></div>
+        <div class="field"><label>Fine</label><input type="time" id="f-end" step="900" value="${f.end || ''}"></div>
       </div>
-      <div class="field"><label>Pausa non pagata (minuti) — facoltativo</label><input type="number" id="f-break" min="0" step="5" value="${f.breakMin || ''}" placeholder="0"></div>
+      <div class="field"><label>Pausa non pagata (minuti) — facoltativo</label><input type="number" id="f-break" min="0" step="15" value="${f.breakMin || ''}" placeholder="0"></div>
       <div class="hint" id="f-calc"></div>`;
 
     const bulk = `
-      <div class="field"><label>Ore totali</label><input type="text" id="f-hours" inputmode="decimal" autocomplete="off" value="${f.hours ? String(f.hours).replace('.', ',') : ''}" placeholder="es. 40"></div>
-      <div class="field"><label>Etichetta (facoltativo)</label><input type="text" id="f-label" value="${esc(f.label)}" placeholder="es. Settimana 12–18 maggio"></div>
-      <div class="hint">Usa la data qui sopra per far rientrare le ore nella settimana/mese giusto. Comodo per inserire in fretta il passato.</div>`;
+      <div class="row-2">
+        <div class="field"><label>Dal</label><input type="date" id="f-date" value="${f.date}"></div>
+        <div class="field"><label>Al</label><input type="date" id="f-date-to" value="${f.dateTo || ''}"></div>
+      </div>
+      <div class="field"><label>Ore totali nel periodo</label><input type="text" id="f-hours" inputmode="decimal" autocomplete="off" value="${f.hours ? String(f.hours).replace('.', ',') : ''}" placeholder="es. 40"></div>
+      <div class="field"><label>Etichetta (facoltativo)</label><input type="text" id="f-label" value="${esc(f.label)}" placeholder="es. Prima settimana di maggio"></div>
+      <div class="hint">Le ore vengono conteggiate nel mese della data <b>"Dal"</b>. Comodo per inserire in fretta i periodi passati.</div>`;
 
     openSheet(`
       <h2>${f.id ? 'Modifica turno' : 'Nuovo turno'}</h2>
@@ -279,7 +291,6 @@
         <button data-type="shift" class="${!isBulk ? 'active' : ''}">🕐 Turno singolo</button>
         <button data-type="bulk" class="${isBulk ? 'active' : ''}">📦 Ore totali</button>
       </div>
-      <div class="field"><label>Data</label><input type="date" id="f-date" value="${f.date}"></div>
       ${isBulk ? bulk : single}
       <div class="field"><label>Sede</label><div class="chips" id="f-locs">${locChips}</div></div>
       <div class="field"><label>Con chi lavori (facoltativo)</label><div class="chips" id="f-cols">${colChips}</div></div>
@@ -299,9 +310,10 @@
     f.date = $('#f-date').value || todayStr();
     if (f.type === 'shift') {
       f.start = $('#f-start').value; f.end = $('#f-end').value;
-      f.breakMin = Number($('#f-break').value) || 0; f.hours = null;
+      f.breakMin = Number($('#f-break').value) || 0; f.hours = null; f.dateTo = null;
     } else {
       f.hours = Number(String($('#f-hours').value).replace(',', '.')) || 0; f.label = $('#f-label').value.trim();
+      const dt = $('#f-date-to'); f.dateTo = dt && dt.value ? dt.value : null;
       f.start = null; f.end = null;
     }
     const note = $('#f-note'); if (note) f.note = note.value.trim();
@@ -474,29 +486,23 @@
   }
 
   function cloudSectionHtml() {
-    if (!window.Cloud) return '';
-    let inner;
-    if (Cloud.active()) {
-      const ps = pushState();
-      let notif;
-      if (ps === 'on') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attive · ti avviso quando finisce il turno</div></div><div class="toggle on" data-act="push-off"></div></div>
-        <div class="list-row" data-act="push-test"><div class="grow"><div class="title">Invia una notifica di prova</div><div class="sub">Per controllare che arrivino</div></div><span>🔔</span></div>`;
-      else if (ps === 'denied') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Bloccate: attivale dalle impostazioni del telefono per quest'app</div></div><span>🔕</span></div>`;
-      else if (ps === 'unsupported') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Su iPhone: installa l'app sulla Home per riceverle</div></div><span>📲</span></div>`;
-      else notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attivale per essere avvisata</div></div><div class="toggle" data-act="push-on"></div></div>`;
-      inner = `<div class="list-row"><div class="grow"><div class="title">Account collegato</div><div class="sub">${esc(Cloud.email() || '')}</div></div><span>✅</span></div>
-        ${notif}
-        <div class="list-row" data-act="cloud-logout"><div class="grow"><div class="title">Esci da questo dispositivo</div><div class="sub">I dati restano sul cloud</div></div><span>🚪</span></div>`;
-    } else if (Cloud.configured()) {
-      inner = `<div class="list-row" data-act="cloud-login"><div class="grow"><div class="title">Accedi con email</div><div class="sub">Cloud configurato · manca solo il login</div></div><span>→</span></div>
-        <div class="list-row" data-act="cloud-config"><div class="grow"><div class="title">Cambia configurazione</div></div><span>⚙️</span></div>`;
-    } else {
-      inner = `<div class="list-row" data-act="cloud-config"><div class="grow"><div class="title">Attiva il cloud</div><div class="sub">Sync tra dispositivi + notifiche (in arrivo)</div></div><span>☁️</span></div>`;
-    }
-    return `<div class="section-title">Cloud e notifiche</div><div class="card">${inner}</div>`;
+    if (!(window.Cloud && Cloud.active())) return '';
+    const ps = pushState();
+    let notif;
+    if (ps === 'on') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attive · ti avviso quando finisce il turno</div></div><div class="toggle on" data-act="push-off"></div></div>
+      <div class="list-row" data-act="push-test"><div class="grow"><div class="title">Invia una notifica di prova</div><div class="sub">Per controllare che arrivino</div></div><span>🔔</span></div>`;
+    else if (ps === 'denied') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Bloccate: attivale dalle impostazioni del telefono per quest'app</div></div><span>🔕</span></div>`;
+    else if (ps === 'unsupported') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Su iPhone: installa l'app sulla Home per riceverle</div></div><span>📲</span></div>`;
+    else notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attivale per essere avvisata</div></div><div class="toggle" data-act="push-on"></div></div>`;
+    const hasName = !!Cloud.name();
+    const inner = `<div class="list-row" data-act="edit-name"><div class="grow"><div class="title">${hasName ? esc(Cloud.name()) : 'Aggiungi nome e cognome'}</div><div class="sub">${esc(Cloud.email() || '')}</div></div><span>${hasName ? '✏️' : '⚠️'}</span></div>
+      ${notif}
+      <div class="list-row" data-act="change-pass"><div class="grow"><div class="title">Cambia password</div></div><span>🔑</span></div>
+      <div class="list-row" data-act="cloud-logout"><div class="grow"><div class="title">Esci</div><div class="sub">Torni alla schermata di accesso</div></div><span>🚪</span></div>`;
+    return `<div class="section-title">Account e notifiche</div><div class="card">${inner}</div>`;
   }
   function cloudFooter() {
-    return (window.Cloud && Cloud.active()) ? ' · sincronizzata sul cloud ☁️' : ' · i dati restano sul tuo telefono';
+    return (window.Cloud && Cloud.active()) ? ' · sincronizzata sul cloud ☁️' : '';
   }
 
   function bindSettings() {
@@ -508,9 +514,9 @@
     act('import', importBackup);
     act('lock', toggleLock);
     act('theme', cycleTheme);
-    act('cloud-config', openCloudConfig);
-    act('cloud-login', openLogin);
-    act('cloud-logout', () => { if (confirm('Uscire dall\'account su questo dispositivo? I dati restano salvati sul cloud e in locale.')) { Cloud.logout(); toast('Uscita fatta'); render(); } });
+    act('edit-name', editNameFlow);
+    act('change-pass', changePasswordFlow);
+    act('cloud-logout', () => { if (confirm('Vuoi uscire? Tornerai alla schermata di accesso. I dati restano salvati sul cloud.')) { Cloud.logout(); showAuth(); } });
     act('push-on', enablePush);
     act('push-off', disablePush);
     act('push-test', sendTestPush);
@@ -733,55 +739,103 @@
     render();
   }
 
-  function openCloudConfig() {
-    openSheet(`<h2>Configura il cloud</h2><p class="sub">Incolla qui il <b>link</b> che ti ho dato (fa tutto da solo). In alternativa, i due valori dal progetto Supabase → Settings → API.</p>
-      <div class="field"><label>Link di configurazione (o Project URL)</label><textarea id="c-url" placeholder="https://redmamba06.github.io/turni/?sb=...&k=..." style="min-height:70px" autocapitalize="none" spellcheck="false"></textarea></div>
-      <div class="field"><label>anon public key (solo se non usi il link)</label><textarea id="c-anon" placeholder="eyJhbGciOi..." style="min-height:70px" autocapitalize="none" spellcheck="false"></textarea></div>
-      <button class="btn" id="c-save">Salva e accedi</button>`);
-    $('#c-save').onclick = () => {
-      let url = $('#c-url').value.trim(), anon = $('#c-anon').value.trim();
-      // Se ha incollato il link completo, estraggo sb e k
-      if (url.indexOf('sb=') >= 0) {
-        try { const u = new URL(url); const sb = u.searchParams.get('sb'); const k = u.searchParams.get('k'); if (sb) url = sb; if (k) anon = k; } catch (e) {}
-      }
-      url = url.replace(/\/+$/, '');
-      if (!/^https:\/\/.+\.supabase\.co$/.test(url)) { toast('URL Supabase non valido'); return; }
-      if (anon.length < 20) { toast('Manca la chiave anon (o incolla il link completo)'); return; }
-      Cloud.setConfig(url, anon); closeSheet(); toast('Cloud configurato ✓'); openLogin();
+  /* ---------- Schermata di accesso (email + password) ---------- */
+  let authMode = 'login'; // 'login' | 'signup'
+  function showAuth() {
+    $('#app').classList.add('hidden');
+    $('#lock').classList.add('hidden');
+    $('#auth').classList.remove('hidden');
+    renderAuth();
+  }
+  function renderAuth() {
+    const login = authMode === 'login';
+    $('#auth').innerHTML = `
+      <div class="auth-logo"><div class="ico">🍦</div><h1>Turni Gelateria</h1></div>
+      <div class="auth-card">
+        <div class="seg">
+          <button data-am="login" class="${login ? 'active' : ''}">Accedi</button>
+          <button data-am="signup" class="${!login ? 'active' : ''}">Registrati</button>
+        </div>
+        ${login ? `
+          <div class="field"><label>Email</label><input type="email" id="a-email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="nome@email.com"></div>
+          <div class="field"><label>Password</label><input type="password" id="a-pass" autocomplete="current-password" placeholder="La tua password"></div>
+          <button class="btn" id="a-go">Accedi</button>
+        ` : `
+          <div class="row-2">
+            <div class="field"><label>Nome</label><input type="text" id="a-first" autocapitalize="words" placeholder="Nome"></div>
+            <div class="field"><label>Cognome</label><input type="text" id="a-last" autocapitalize="words" placeholder="Cognome"></div>
+          </div>
+          <div class="field"><label>Email</label><input type="email" id="a-email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="nome@email.com"></div>
+          <div class="field"><label>Password</label><input type="password" id="a-pass" autocomplete="new-password" placeholder="Almeno 6 caratteri"></div>
+          <button class="btn" id="a-go">Crea account</button>
+        `}
+        <div class="auth-err" id="a-err"></div>
+      </div>`;
+    $$('#auth [data-am]').forEach((b) => b.onclick = () => { authMode = b.dataset.am; renderAuth(); });
+    $('#a-go').onclick = login ? doLogin : doSignup;
+    const pass = $('#a-pass'); if (pass) pass.onkeydown = (e) => { if (e.key === 'Enter') $('#a-go').click(); };
+  }
+  function authErr(m) { const e = $('#a-err'); if (e) e.textContent = m || ''; }
+  async function doLogin() {
+    const mail = $('#a-email').value.trim(), pass = $('#a-pass').value;
+    if (!/.+@.+\..+/.test(mail)) { authErr('Email non valida'); return; }
+    if (!pass) { authErr('Inserisci la password'); return; }
+    const btn = $('#a-go'); btn.textContent = 'Accesso…'; btn.disabled = true; authErr('');
+    try { await Cloud.signInPassword(mail, pass); await afterAuth(); }
+    catch (e) { authErr(e.message); btn.textContent = 'Accedi'; btn.disabled = false; }
+  }
+  async function doSignup() {
+    const first = $('#a-first').value.trim(), last = $('#a-last').value.trim();
+    const mail = $('#a-email').value.trim(), pass = $('#a-pass').value;
+    if (!first || !last) { authErr('Inserisci nome e cognome'); return; }
+    if (!/.+@.+\..+/.test(mail)) { authErr('Email non valida'); return; }
+    if (pass.length < 6) { authErr('Password troppo corta (minimo 6)'); return; }
+    const btn = $('#a-go'); btn.textContent = 'Creazione…'; btn.disabled = true; authErr('');
+    try { await Cloud.signUp(mail, pass, first, last); await afterAuth(); }
+    catch (e) { authErr(e.message); btn.textContent = 'Crea account'; btn.disabled = false; }
+  }
+  async function afterAuth() {
+    $('#auth').classList.add('hidden');
+    $('#app').classList.remove('hidden');
+    try { await syncFromCloud(); } catch (e) { console.warn(e); }
+    render();
+    toast('Benvenuta' + (Cloud.firstName() ? ', ' + Cloud.firstName() : '') + '! 🍦');
+    if (!Cloud.name()) setTimeout(editNameFlow, 600);
+  }
+
+  function editNameFlow() {
+    const cur = (Cloud.name() || '').split(' ');
+    const first = cur[0] || '', last = cur.slice(1).join(' ') || '';
+    openSheet(`<h2>Nome e cognome</h2><p class="sub">Così l'app ti saluta e (in futuro) l'admin vede chi sei.</p>
+      <div class="row-2">
+        <div class="field"><label>Nome</label><input type="text" id="pn-first" autocapitalize="words" value="${esc(first)}" placeholder="Nome"></div>
+        <div class="field"><label>Cognome</label><input type="text" id="pn-last" autocapitalize="words" value="${esc(last)}" placeholder="Cognome"></div>
+      </div>
+      <button class="btn" id="pn-save">Salva</button>`);
+    $('#pn-first').focus();
+    $('#pn-save').onclick = async () => {
+      const f = $('#pn-first').value.trim(), l = $('#pn-last').value.trim();
+      if (!f || !l) { toast('Inserisci nome e cognome'); return; }
+      const btn = $('#pn-save'); btn.textContent = 'Salvo…'; btn.disabled = true;
+      try { await Cloud.updateName(f, l); closeSheet(); toast('Profilo aggiornato ✓'); render(); }
+      catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Salva'; btn.disabled = false; }
     };
   }
 
-  function openLogin() {
-    openSheet(`<h2>Accedi</h2><p class="sub">Ti mando un codice via email. Nessuna password da ricordare.</p>
-      <div class="field"><label>La tua email</label><input type="email" id="c-email" placeholder="nome@email.com" autocomplete="email" autocapitalize="none" spellcheck="false"></div>
-      <button class="btn" id="c-send">Mandami il codice</button>`);
-    $('#c-email').focus();
-    $('#c-send').onclick = async () => {
-      const mail = $('#c-email').value.trim();
-      if (!/.+@.+\..+/.test(mail)) { toast('Email non valida'); return; }
-      const btn = $('#c-send'); btn.textContent = 'Invio…'; btn.disabled = true;
-      try { await Cloud.sendMagicLink(mail); askCode(mail); }
-      catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Mandami il codice'; btn.disabled = false; }
+  function changePasswordFlow() {
+    openSheet(`<h2>Cambia password</h2><p class="sub">Scegli una nuova password (almeno 6 caratteri).</p>
+      <div class="field"><label>Nuova password</label><input type="password" id="np1" autocomplete="new-password"></div>
+      <div class="field"><label>Ripeti password</label><input type="password" id="np2" autocomplete="new-password"></div>
+      <button class="btn" id="np-save">Salva</button>`);
+    $('#np1').focus();
+    $('#np-save').onclick = async () => {
+      const a = $('#np1').value, b = $('#np2').value;
+      if (a.length < 6) { toast('Password troppo corta'); return; }
+      if (a !== b) { toast('Le due password non coincidono'); return; }
+      const btn = $('#np-save'); btn.textContent = 'Salvo…'; btn.disabled = true;
+      try { await Cloud.changePassword(a); closeSheet(); toast('Password aggiornata ✓'); }
+      catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Salva'; btn.disabled = false; }
     };
-  }
-
-  function askCode(mail) {
-    openSheet(`<h2>📧 Inserisci il codice</h2><p class="sub">Ho mandato un codice a <b>${esc(mail)}</b>. Controlla la mail (anche lo spam) e scrivilo qui.</p>
-      <div class="field"><label>Codice a 6 cifre</label><input type="text" id="c-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" style="font-size:22px;letter-spacing:4px;text-align:center"></div>
-      <button class="btn" id="c-verify">Entra</button>
-      <button class="btn secondary" id="c-resend">Rimanda il codice</button>`);
-    $('#c-code').focus();
-    $('#c-verify').onclick = async () => {
-      const code = $('#c-code').value.trim();
-      if (!/^\d{6,8}$/.test(code)) { toast('Codice non valido'); return; }
-      const btn = $('#c-verify'); btn.textContent = 'Verifico…'; btn.disabled = true;
-      try {
-        await Cloud.verifyCode(mail, code);
-        closeSheet(); toast('Collegata ✓');
-        await syncFromCloud();
-      } catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Entra'; btn.disabled = false; }
-    };
-    $('#c-resend').onclick = async () => { try { await Cloud.sendMagicLink(mail); toast('Codice rimandato'); } catch (e) { toast('Errore: ' + e.message); } };
   }
 
   /* ---------- Export PDF del mese (via stampa) ---------- */
@@ -832,46 +886,37 @@
     setTimeout(() => { window.print(); setTimeout(cleanup, 1500); }, 60);
   }
 
+  function openFinishFromParam() {
+    const finishId = new URLSearchParams(location.search).get('finish');
+    if (finishId && S.getShift(finishId)) openShiftSheet(finishId);
+  }
+
   /* ================= AVVIO ================= */
   async function boot() {
     applyTheme();
     $$('.tab').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
     $('#btn-today').onclick = () => { calCursor = new Date(); render(); };
-
-    // Config cloud da link (?sb=...&k=...): la chiave anon è pubblica
-    if (window.Cloud) {
-      const q = new URLSearchParams(location.search);
-      const sb = q.get('sb'), k = q.get('k');
-      if (sb && k) {
-        Cloud.setConfig(sb, k);
-        q.delete('sb'); q.delete('k');
-        const qs = q.toString();
-        history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
-      }
-    }
-
-    // Ritorno dal link email: cattura la sessione
-    let justLoggedIn = false;
-    if (window.Cloud) justLoggedIn = Cloud.captureRedirect();
-
     setTab('home');
     $$('.tab')[0].classList.add('active');
-    if (S.settings().lockEnabled && !justLoggedIn) showLock();
-    else { $('#app').classList.remove('hidden'); }
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW non registrato', e));
+      // La notifica cliccata apre direttamente il turno (anche ad app già aperta)
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'finish' && e.data.id) { const s = S.getShift(e.data.id); if (s) openShiftSheet(e.data.id); }
+      });
     }
 
-    // Sincronizza col cloud se già collegata
-    if (window.Cloud && Cloud.configured() && Cloud.loggedIn()) {
-      try { await Cloud.loadUser(); await syncFromCloud(); if (justLoggedIn) toast('Collegata ✓'); }
-      catch (e) { console.warn('sync iniziale', e); }
+    if (window.Cloud && Cloud.loggedIn()) {
+      // Già loggata: mostra l'app (o il PIN) e sincronizza
+      if (S.settings().lockEnabled) showLock(); else $('#app').classList.remove('hidden');
+      try { await Cloud.loadUser(); await syncFromCloud(); } catch (e) { console.warn('sync iniziale', e); }
+      openFinishFromParam();
+      if (Cloud.active() && !Cloud.name()) setTimeout(editNameFlow, 600);
+    } else {
+      // Non loggata: schermata di accesso
+      showAuth();
     }
-
-    // Deep link dalla notifica di fine turno: apri direttamente il turno da chiudere
-    const finishId = new URLSearchParams(location.search).get('finish');
-    if (finishId && S.getShift(finishId)) openShiftSheet(finishId);
   }
   boot();
 })();

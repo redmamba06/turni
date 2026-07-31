@@ -4,9 +4,13 @@
   'use strict';
   const CFG = 'turni:cloud';   // { url, anon }
   const SESS = 'turni:sess';   // { access_token, refresh_token, expires_at }
+  // Configurazione incorporata (la anon key è pubblica per definizione): l'utente non deve incollare nulla.
+  const DEFAULT_URL = 'https://bfkdhsazithymcdbxxot.supabase.co';
+  const DEFAULT_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJma2Roc2F6aXRoeW1jZGJ4eG90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODQ4MzgsImV4cCI6MjA5ODY2MDgzOH0.cpZWPUIxbNOHy4gSQZrDbaZKewXh3IiDU9nyJSFQHY0';
   let cfg = read(CFG);
+  if (!cfg || !cfg.url || !cfg.anon) { cfg = { url: DEFAULT_URL, anon: DEFAULT_ANON }; write(CFG, cfg); }
   let sess = read(SESS);
-  let me = null;               // { id, email }
+  let me = null;               // { id, email, name }
 
   function read(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
   function write(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
@@ -17,6 +21,18 @@
   function active() { return configured() && loggedIn(); }
   function email() { return me && me.email; }
   function userId() { return me && me.id; }
+  function name() { return me && me.name; }
+  function firstName() { return (me && me.name || '').split(' ')[0] || ''; }
+  function meFrom(u) {
+    const md = (u && u.user_metadata) || {};
+    const nm = md.full_name || [md.first_name, md.last_name].filter(Boolean).join(' ') || '';
+    return { id: u.id, email: u.email, name: nm };
+  }
+  function storeSession(d) {
+    sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (d.expires_in || 3600) * 1000 };
+    write(SESS, sess);
+    if (d.user) me = meFrom(d.user);
+  }
   function setConfig(url, anon) {
     cfg = { url: (url || '').trim().replace(/\/+$/, ''), anon: (anon || '').trim() };
     write(CFG, cfg);
@@ -29,7 +45,56 @@
     return o;
   }
 
-  /* ---------- Auth (GoTrue) ---------- */
+  /* ---------- Auth email + password ---------- */
+  async function signInPassword(mail, password) {
+    const r = await fetch(cfg.url + '/auth/v1/token?grant_type=password', {
+      method: 'POST', headers: headers(false),
+      body: JSON.stringify({ email: (mail || '').trim(), password: password }),
+    });
+    if (!r.ok) { let m = 'Email o password errati'; try { const j = await r.json(); m = j.error_description || j.msg || m; } catch (e) {} throw new Error(m); }
+    const d = await r.json();
+    storeSession(d);
+    if (!me) await loadUser();
+    return me;
+  }
+  async function signUp(mail, password, first, last) {
+    const full = [first, last].filter(Boolean).join(' ').trim();
+    const r = await fetch(cfg.url + '/auth/v1/signup', {
+      method: 'POST', headers: headers(false),
+      body: JSON.stringify({ email: (mail || '').trim(), password: password, data: { first_name: first, last_name: last, full_name: full } }),
+    });
+    if (!r.ok) { let m = 'Registrazione non riuscita'; try { const j = await r.json(); m = j.msg || j.error_description || m; } catch (e) {} throw new Error(m); }
+    const d = await r.json();
+    // con mailer_autoconfirm la signup restituisce già la sessione
+    if (d.access_token) storeSession(d);
+    else return signInPassword(mail, password);
+    try { await saveProfile(first, last, mail); } catch (e) { console.warn('profilo', e); }
+    if (!me) await loadUser();
+    return me;
+  }
+  async function changePassword(newPass) {
+    await ensureFresh();
+    const rr = await fetch(cfg.url + '/auth/v1/user', { method: 'PUT', headers: headers(true), body: JSON.stringify({ password: newPass }) });
+    if (!rr.ok) { let m = 'Impossibile cambiare la password'; try { m = (await rr.json()).msg || m; } catch (e) {} throw new Error(m); }
+    return true;
+  }
+  async function updateName(first, last) {
+    await ensureFresh();
+    const full = [first, last].filter(Boolean).join(' ').trim();
+    const r = await fetch(cfg.url + '/auth/v1/user', { method: 'PUT', headers: headers(true), body: JSON.stringify({ data: { first_name: first, last_name: last, full_name: full } }) });
+    if (!r.ok) throw new Error('Impossibile salvare il nome');
+    const u = await r.json(); me = meFrom(u);
+    try { await saveProfile(first, last, me.email); } catch (e) {}
+    return me;
+  }
+  async function saveProfile(first, last, mail) {
+    const full = [first, last].filter(Boolean).join(' ').trim();
+    const row = { id: userId(), first_name: first || '', last_name: last || '', full_name: full, email: mail || email() };
+    const r = await rest('profiles?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
+    if (!r.ok) throw new Error('profilo: ' + await r.text());
+  }
+
+  /* ---------- Auth (magic link / OTP — mantenuto) ---------- */
   async function sendMagicLink(mail) {
     const redirect = location.origin + location.pathname;
     const r = await fetch(cfg.url + '/auth/v1/otp?redirect_to=' + encodeURIComponent(redirect), {
@@ -50,7 +115,7 @@
     const d = await r.json();
     sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (d.expires_in || 3600) * 1000 };
     write(SESS, sess);
-    if (d.user) me = { id: d.user.id, email: d.user.email };
+    if (d.user) me = meFrom(d.user);
     return me || (await loadUser());
   }
 
@@ -79,7 +144,7 @@
     const d = await r.json();
     sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (d.expires_in || 3600) * 1000 };
     write(SESS, sess);
-    if (d.user) me = { id: d.user.id, email: d.user.email };
+    if (d.user) me = meFrom(d.user);
     return true;
   }
   async function ensureFresh() {
@@ -92,7 +157,7 @@
     if (r.status === 401) { if (await refresh()) return loadUser(); logout(); return null; }
     if (!r.ok) return null;
     const u = await r.json();
-    me = { id: u.id, email: u.email };
+    me = meFrom(u);
     return me;
   }
   function logout() { localStorage.removeItem(SESS); sess = null; me = null; }
@@ -119,7 +184,7 @@
   /* ---------- Mappatura modello app <-> DB ---------- */
   function shiftToDb(s) {
     return {
-      id: s.id, user_id: userId(), type: s.type, date: s.date,
+      id: s.id, user_id: userId(), type: s.type, date: s.date, date_to: s.dateTo || null,
       start: s.start, end: s.end, hours: s.hours, break_min: s.breakMin || 0,
       label: s.label || '', location_id: s.locationId, colleague_ids: s.colleagueIds || [],
       rating: s.rating, note: s.note || '', updated_at: new Date().toISOString(),
@@ -127,7 +192,7 @@
   }
   function shiftFromDb(d) {
     return {
-      id: d.id, type: d.type, date: d.date, start: d.start, end: d.end,
+      id: d.id, type: d.type, date: d.date, dateTo: d.date_to || null, start: d.start, end: d.end,
       hours: d.hours != null ? Number(d.hours) : null, breakMin: d.break_min || 0,
       label: d.label || '', locationId: d.location_id, colleagueIds: d.colleague_ids || [],
       rating: d.rating || null, note: d.note || '',
@@ -187,8 +252,9 @@
   }
 
   global.Cloud = {
-    configured, loggedIn, active, email, userId, tz,
+    configured, loggedIn, active, email, userId, name, firstName, tz,
     setConfig, clearConfig, sendMagicLink, verifyCode, captureRedirect, loadUser, logout,
+    signInPassword, signUp, changePassword, updateName, saveProfile,
     pullAll, migrateFromLocal,
     pushShift, removeShift, pushLocation, removeLocation, pushColleague, removeColleague, pushSettings,
     saveSubscription, deleteSubscription, invokeFunction,

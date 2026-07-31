@@ -1,5 +1,5 @@
 /* Service worker: cache offline dell'app (app shell). I dati stanno in localStorage. */
-const CACHE = 'turni-v3';
+const CACHE = 'turni-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -57,10 +57,15 @@ self.addEventListener('push', (e) => {
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || './';
+  let finishId = null;
+  try { finishId = new URL(url, self.location.origin).searchParams.get('finish'); } catch (_) {}
   e.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const c of all) {
-      if ('focus' in c) { await c.focus(); if ('navigate' in c) { try { await c.navigate(url); } catch (_) {} } return; }
+      await c.focus();
+      if (finishId) c.postMessage({ type: 'finish', id: finishId });
+      else if ('navigate' in c) { try { await c.navigate(url); } catch (_) {} }
+      return;
     }
     if (self.clients.openWindow) return self.clients.openWindow(url);
   })());

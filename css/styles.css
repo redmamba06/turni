@@ -241,6 +241,20 @@ input, select, textarea { font-family: inherit; font-size: 16px; }
 .pin-pad button.blank { background: none; }
 .lock .link-btn { color: #fff; margin-top: 20px; opacity: .9; }
 
+/* ---------- Schermata di accesso ---------- */
+.auth-screen {
+  position: fixed; inset: 0; z-index: 55; overflow-y: auto;
+  background: linear-gradient(160deg, var(--blue), var(--blue-d));
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: calc(var(--safe-t) + 24px) 20px calc(var(--safe-b) + 24px);
+}
+.auth-card { background: var(--card); border-radius: 24px; box-shadow: var(--shadow); padding: 24px; width: 100%; max-width: 400px; }
+.auth-logo { text-align: center; color: #fff; margin-bottom: 18px; }
+.auth-logo .ico { font-size: 52px; }
+.auth-logo h1 { font-size: 28px; font-weight: 800; margin: 4px 0 0; }
+.auth-card h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
+.auth-err { color: var(--danger); font-size: 13px; font-weight: 600; min-height: 18px; margin-top: 4px; }
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; bottom: calc(96px + var(--safe-b)); left: 50%; transform: translateX(-50%);
