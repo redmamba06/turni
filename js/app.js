@@ -133,7 +133,6 @@
     const loc = S.getLocation(s.locationId);
     const color = loc ? loc.color : 'var(--blue)';
     const h = S.shiftHours(s);
-    const cols = s.colleagueIds.map((id) => (S.getColleague(id) || {}).name).filter(Boolean);
     const d = S.parseYmd(s.date);
     let dateLabel;
     if (s.type === 'bulk' && s.dateTo && s.dateTo !== s.date) {
@@ -149,7 +148,6 @@
     meta.push(`<span>${dateLabel}</span>`);
     meta.push(`<span>${fmtHours(h)}</span>`);
     if (loc) meta.push(`<span><i class="dot" style="background:${loc.color}"></i> ${esc(loc.name)}</span>`);
-    if (cols.length) meta.push(`<span>👥 ${esc(cols.join(', '))}</span>`);
     if (s.rating) meta.push(`<span class="stars-mini">${'★'.repeat(s.rating)}</span>`);
     return `<div class="shift-item" data-shift="${s.id}">
       <div class="shift-bar" style="background:${color}"></div>
@@ -272,16 +270,11 @@
     const f = formState;
     const isBulk = f.type === 'bulk';
     const locs = S.locations();
-    const cols = S.colleagues();
 
     const locChips = locs.length ? locs.map((l) =>
       `<button class="chip loc ${f.locationId === l.id ? 'on' : ''}" data-loc="${l.id}" style="${f.locationId === l.id ? `background:${l.color};border-color:${l.color}` : ''}">
         <i class="dot" style="background:${f.locationId === l.id ? '#fff' : l.color}"></i>${esc(l.name)}</button>`).join('')
       : `<span class="muted" style="font-size:13px">Nessuna sede. Aggiungile nelle Impostazioni.</span>`;
-
-    const colChips = cols.length ? cols.map((c) =>
-      `<button class="chip ${f.colleagueIds.includes(c.id) ? 'on' : ''}" data-col="${c.id}">${esc(c.name)}</button>`).join('')
-      : `<span class="muted" style="font-size:13px">Nessun collega. Aggiungili nelle Impostazioni.</span>`;
 
     const single = `
       <div class="field"><label>Data</label><input type="date" id="f-date" value="${f.date}"></div>
@@ -309,7 +302,6 @@
       </div>
       ${isBulk ? bulk : single}
       <div class="field"><label>Sede</label><div class="chips" id="f-locs">${locChips}</div></div>
-      <div class="field"><label>Con chi lavori (facoltativo)</label><div class="chips" id="f-cols">${colChips}</div></div>
       <div class="field"><label>Voto turno (facoltativo)</label>
         <div class="stars" id="f-stars">${[1, 2, 3, 4, 5].map((n) => `<span class="s ${f.rating >= n ? 'on' : ''}" data-star="${n}">★</span>`).join('')}</div>
       </div>
@@ -349,11 +341,6 @@
   function bindShiftSheet() {
     $$('[data-type]').forEach((b) => b.onclick = () => { readForm(); formState.type = b.dataset.type; renderShiftSheet(); });
     $$('#f-locs [data-loc]').forEach((b) => b.onclick = () => { formState.locationId = (formState.locationId === b.dataset.loc) ? null : b.dataset.loc; renderShiftSheet(); });
-    $$('#f-cols [data-col]').forEach((b) => b.onclick = () => {
-      const id = b.dataset.col; const i = formState.colleagueIds.indexOf(id);
-      if (i >= 0) formState.colleagueIds.splice(i, 1); else formState.colleagueIds.push(id);
-      b.classList.toggle('on');
-    });
     $$('#f-stars [data-star]').forEach((b) => b.onclick = () => {
       const n = Number(b.dataset.star);
       formState.rating = (formState.rating === n) ? null : n;
@@ -414,7 +401,6 @@
     if (statsRange === 'month') { from = S.startOfMonth(now); to = S.endOfMonth(now); label = MONTHS[now.getMonth()]; }
     else { from = null; to = null; label = 'Sempre'; }
     const sum = from ? S.summarize(from, to) : totalAll();
-    const byCol = S.hoursByColleague(from, to);
     const byLoc = S.hoursByLocation(from, to);
 
     let html = `<div class="seg">
@@ -447,24 +433,6 @@
       html += `</div>`;
     }
 
-    // Per collega
-    const colKeys = Object.keys(byCol);
-    html += `<div class="section-title">Ore con ogni collega 👥</div>`;
-    if (colKeys.length) {
-      const maxH = Math.max(...colKeys.map((k) => byCol[k]));
-      html += `<div class="card">`;
-      colKeys.sort((a, b) => byCol[b] - byCol[a]).forEach((k) => {
-        const c = S.getColleague(k); if (!c) return;
-        html += `<div style="margin-bottom:12px">
-          <div class="shift-top"><b>${esc(c.name)}</b><span class="muted">${fmtHours(byCol[k])}</span></div>
-          <div class="bar"><i style="width:${maxH ? (byCol[k] / maxH * 100) : 0}%"></i></div>
-        </div>`;
-      });
-      html += `</div>`;
-    } else {
-      html += `<div class="empty" style="padding:24px">Segna "con chi lavori" nei turni per vedere le ore fatte insieme.</div>`;
-    }
-
     setTimeout(() => $$('[data-range]').forEach((b) => b.onclick = () => { statsRange = b.dataset.range; render(); }), 0);
     return html;
   }
@@ -478,7 +446,6 @@
   function viewSettings() {
     const st = S.settings();
     const locs = S.locations();
-    const cols = S.colleagues();
     return `
       <div class="section-title">Paga</div>
       <div class="card">
@@ -497,16 +464,6 @@
           <button class="icon-btn" data-locdel="${l.id}">🗑️</button>
         </div>`).join('') || '<div class="muted" style="padding:6px 0">Nessuna sede ancora.</div>'}
         <button class="link-btn" data-act="addloc">+ Aggiungi sede</button>
-      </div>
-
-      <div class="section-title">Colleghi</div>
-      <div class="card" id="col-list">
-        ${cols.map((c) => `<div class="list-row">
-          <div class="grow"><div class="title">${esc(c.name)}</div></div>
-          <button class="icon-btn" data-coledit="${c.id}">✏️</button>
-          <button class="icon-btn" data-coldel="${c.id}">🗑️</button>
-        </div>`).join('') || '<div class="muted" style="padding:6px 0">Nessun collega ancora.</div>'}
-        <button class="link-btn" data-act="addcol">+ Aggiungi collega</button>
       </div>
 
       <div class="section-title">Privacy & tema</div>
@@ -556,7 +513,6 @@
     const act = (name, fn) => $$(`[data-act="${name}"]`).forEach((el) => el.onclick = fn);
     act('pay', editHourlyPay);
     act('addloc', () => editLocation(null));
-    act('addcol', () => editColleague(null));
     act('export', exportBackup);
     act('import', importBackup);
     act('lock', toggleLock);
@@ -572,11 +528,6 @@
     $$('[data-locdel]').forEach((b) => b.onclick = () => {
       const l = S.getLocation(b.dataset.locdel);
       if (confirm(`Eliminare la sede "${l.name}"? I turni resteranno senza sede.`)) { S.deleteLocation(l.id); render(); }
-    });
-    $$('[data-coledit]').forEach((b) => b.onclick = () => editColleague(b.dataset.coledit));
-    $$('[data-coldel]').forEach((b) => b.onclick = () => {
-      const c = S.getColleague(b.dataset.coldel);
-      if (confirm(`Eliminare il collega "${c.name}"?`)) { S.deleteColleague(c.id); render(); }
     });
   }
 
@@ -895,11 +846,12 @@
     const list = S.shiftsInMonth(y, m).slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
     const byLoc = S.hoursByLocation(S.startOfMonth(calCursor), S.endOfMonth(calCursor));
     const money = (n) => (n || 0).toFixed(2).replace('.', ',') + ' €';
+    const authorName = (window.Cloud && Cloud.name && Cloud.name()) || '';
 
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
     const M = 40; let yy = M + 4;
-    const col = { day: M, when: M + 66, loc: M + 160, who: M + 268, hoursR: W - M - 72, payR: W - M };
+    const col = { day: M, when: M + 66, loc: M + 180, hoursR: W - M - 72, payR: W - M };
     const trunc = (t, w) => { const p = doc.splitTextToSize(String(t || ''), w); return p[0] || ''; };
 
     // Intestazione
@@ -907,7 +859,11 @@
     doc.text('Turni Gelateria', M, yy);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(22, 163, 74);
     doc.text(money(mo.earnings), W - M, yy, { align: 'right' });
-    yy += 18;
+    yy += 20;
+    if (authorName) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
+      doc.text(authorName, M, yy); yy += 16;
+    }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(100, 116, 139);
     doc.text(MONTHS[m] + ' ' + y, M, yy);
     doc.setFontSize(10); doc.text(fmtHours(mo.hours) + ' · ' + turniLabel(mo.count), W - M, yy, { align: 'right' });
@@ -916,7 +872,7 @@
 
     function tableHeader() {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(37, 99, 235);
-      doc.text('GIORNO', col.day, yy); doc.text('ORARIO', col.when, yy); doc.text('SEDE', col.loc, yy); doc.text('CON CHI', col.who, yy);
+      doc.text('GIORNO', col.day, yy); doc.text('ORARIO', col.when, yy); doc.text('SEDE', col.loc, yy);
       doc.text('ORE', col.hoursR, yy, { align: 'right' }); doc.text('GUADAGNO', col.payR, yy, { align: 'right' });
       yy += 6; doc.setDrawColor(225); doc.setLineWidth(0.5); doc.line(M, yy, W - M, yy); yy += 13;
     }
@@ -926,16 +882,14 @@
     list.forEach((s) => {
       if (yy > H - 80) { doc.addPage(); yy = M; tableHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); }
       const loc = S.getLocation(s.locationId);
-      const who = s.colleagueIds.map((id) => (S.getColleague(id) || {}).name).filter(Boolean).join(', ');
       const d = S.parseYmd(s.date);
       const dn = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate();
       const when = s.type === 'bulk' ? (s.label || 'Ore') : ((s.start || '--') + '-' + (s.end || '--'));
       const rate = s.rating ? ' (' + s.rating + '/5)' : '';
       doc.setTextColor(15, 23, 42);
       doc.text(dn, col.day, yy);
-      doc.text(trunc(when, 88), col.when, yy);
-      doc.text(trunc(loc ? loc.name : '-', 104), col.loc, yy);
-      doc.text(trunc((who || '-') + rate, 175), col.who, yy);
+      doc.text(trunc(when + rate, 108), col.when, yy);
+      doc.text(trunc(loc ? loc.name : '-', 255), col.loc, yy);
       doc.text(fmtHours(S.shiftHours(s)), col.hoursR, yy, { align: 'right' });
       doc.setTextColor(22, 163, 74);
       doc.text(money(S.shiftEarnings(s)), col.payR, yy, { align: 'right' });
