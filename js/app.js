@@ -761,6 +761,7 @@
           <div class="field"><label>Email</label><input type="email" id="a-email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="nome@email.com"></div>
           <div class="field"><label>Password</label><input type="password" id="a-pass" autocomplete="current-password" placeholder="La tua password"></div>
           <button class="btn" id="a-go">Accedi</button>
+          <button class="link-btn" id="a-forgot" style="display:block;margin:12px auto 0">Password dimenticata?</button>
         ` : `
           <div class="row-2">
             <div class="field"><label>Nome</label><input type="text" id="a-first" autocapitalize="words" placeholder="Nome"></div>
@@ -775,6 +776,52 @@
     $$('#auth [data-am]').forEach((b) => b.onclick = () => { authMode = b.dataset.am; renderAuth(); });
     $('#a-go').onclick = login ? doLogin : doSignup;
     const pass = $('#a-pass'); if (pass) pass.onkeydown = (e) => { if (e.key === 'Enter') $('#a-go').click(); };
+    const fg = $('#a-forgot'); if (fg) fg.onclick = forgotFlow;
+  }
+
+  /* ---------- Password dimenticata ---------- */
+  function forgotFlow() {
+    openSheet(`<h2>Password dimenticata</h2><p class="sub">Ti mando un codice via email per reimpostarla.</p>
+      <div class="field"><label>La tua email</label><input type="email" id="fp-email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="nome@email.com"></div>
+      <button class="btn" id="fp-send">Mandami il codice</button>`);
+    $('#fp-email').focus();
+    $('#fp-send').onclick = async () => {
+      const mail = $('#fp-email').value.trim();
+      if (!/.+@.+\..+/.test(mail)) { toast('Email non valida'); return; }
+      const b = $('#fp-send'); b.textContent = 'Invio…'; b.disabled = true;
+      try { await Cloud.sendRecovery(mail); forgotCode(mail); }
+      catch (e) { toast('Errore: ' + e.message); b.textContent = 'Mandami il codice'; b.disabled = false; }
+    };
+  }
+  function forgotCode(mail) {
+    openSheet(`<h2>📧 Inserisci il codice</h2><p class="sub">Ho mandato un codice a <b>${esc(mail)}</b> (controlla anche lo spam).</p>
+      <div class="field"><label>Codice a 6 cifre</label><input type="text" id="fp-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" style="font-size:22px;letter-spacing:4px;text-align:center"></div>
+      <button class="btn" id="fp-verify">Continua</button>
+      <button class="btn secondary" id="fp-resend">Rimanda il codice</button>`);
+    $('#fp-code').focus();
+    $('#fp-verify').onclick = async () => {
+      const code = $('#fp-code').value.trim();
+      if (!/^\d{6,8}$/.test(code)) { toast('Codice non valido'); return; }
+      const b = $('#fp-verify'); b.textContent = 'Verifico…'; b.disabled = true;
+      try { await Cloud.verifyRecovery(mail, code); forgotNewPass(); }
+      catch (e) { toast('Errore: ' + e.message); b.textContent = 'Continua'; b.disabled = false; }
+    };
+    $('#fp-resend').onclick = async () => { try { await Cloud.sendRecovery(mail); toast('Codice rimandato'); } catch (e) { toast('Errore: ' + e.message); } };
+  }
+  function forgotNewPass() {
+    openSheet(`<h2>Nuova password</h2><p class="sub">Scegli una nuova password (almeno 6 caratteri).</p>
+      <div class="field"><label>Nuova password</label><input type="password" id="fp-p1" autocomplete="new-password"></div>
+      <div class="field"><label>Ripeti password</label><input type="password" id="fp-p2" autocomplete="new-password"></div>
+      <button class="btn" id="fp-save">Salva ed entra</button>`);
+    $('#fp-p1').focus();
+    $('#fp-save').onclick = async () => {
+      const a = $('#fp-p1').value, b = $('#fp-p2').value;
+      if (a.length < 6) { toast('Password troppo corta'); return; }
+      if (a !== b) { toast('Le due password non coincidono'); return; }
+      const btn = $('#fp-save'); btn.textContent = 'Salvo…'; btn.disabled = true;
+      try { await Cloud.changePassword(a); closeSheet(); toast('Password reimpostata ✓'); await afterAuth(); }
+      catch (e) { toast('Errore: ' + e.message); btn.textContent = 'Salva ed entra'; btn.disabled = false; }
+    };
   }
   function authErr(m) { const e = $('#a-err'); if (e) e.textContent = m || ''; }
   async function doLogin() {

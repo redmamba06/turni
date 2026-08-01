@@ -72,6 +72,16 @@
     if (!me) await loadUser();
     return me;
   }
+  async function sendRecovery(mail) {
+    const r = await fetch(cfg.url + '/auth/v1/recover', { method: 'POST', headers: headers(false), body: JSON.stringify({ email: (mail || '').trim() }) });
+    if (!r.ok) { let m = 'Errore invio codice'; try { m = (await r.json()).msg || m; } catch (e) {} throw new Error(m); }
+    return true;
+  }
+  async function verifyRecovery(mail, token) {
+    const r = await fetch(cfg.url + '/auth/v1/verify', { method: 'POST', headers: headers(false), body: JSON.stringify({ type: 'recovery', email: (mail || '').trim(), token: (token || '').trim() }) });
+    if (!r.ok) { let m = 'Codice non valido'; try { const j = await r.json(); m = j.msg || j.error_description || m; } catch (e) {} throw new Error(m); }
+    const d = await r.json(); storeSession(d); if (!me) await loadUser(); return me;
+  }
   async function changePassword(newPass) {
     await ensureFresh();
     const rr = await fetch(cfg.url + '/auth/v1/user', { method: 'PUT', headers: headers(true), body: JSON.stringify({ password: newPass }) });
@@ -287,7 +297,7 @@
   global.Cloud = {
     configured, loggedIn, active, email, userId, name, firstName, tz,
     setConfig, clearConfig, sendMagicLink, verifyCode, captureRedirect, loadUser, logout,
-    signInPassword, signUp, changePassword, updateName, saveProfile,
+    signInPassword, signUp, changePassword, updateName, saveProfile, sendRecovery, verifyRecovery,
     pullAll, migrateFromLocal,
     pushShift, removeShift, pushLocation, removeLocation, pushColleague, removeColleague, pushSettings,
     saveSubscription, deleteSubscription, invokeFunction,
