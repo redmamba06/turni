@@ -886,51 +886,101 @@
   }
 
   /* ---------- Export PDF del mese (via stampa) ---------- */
-  function exportMonthPdf() {
+  async function exportMonthPdf() {
+    if (!(window.jspdf && window.jspdf.jsPDF)) { toast('Libreria PDF non caricata'); return; }
+    const { jsPDF } = window.jspdf;
     const y = calCursor.getFullYear(), m = calCursor.getMonth();
     const pay = S.settings().hourlyPay;
-    const list = S.shiftsInMonth(y, m).slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
     const mo = S.summaryMonth(calCursor);
+    const list = S.shiftsInMonth(y, m).slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
     const byLoc = S.hoursByLocation(S.startOfMonth(calCursor), S.endOfMonth(calCursor));
+    const money = (n) => (n || 0).toFixed(2).replace('.', ',') + ' €';
 
-    const rows = list.map((s) => {
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const M = 40; let yy = M + 4;
+    const col = { day: M, when: M + 66, loc: M + 160, who: M + 268, hoursR: W - M - 72, payR: W - M };
+    const trunc = (t, w) => { const p = doc.splitTextToSize(String(t || ''), w); return p[0] || ''; };
+
+    // Intestazione
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(15, 23, 42);
+    doc.text('Turni Gelateria', M, yy);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(22, 163, 74);
+    doc.text(money(mo.earnings), W - M, yy, { align: 'right' });
+    yy += 18;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(100, 116, 139);
+    doc.text(MONTHS[m] + ' ' + y, M, yy);
+    doc.setFontSize(10); doc.text(fmtHours(mo.hours) + ' · ' + turniLabel(mo.count), W - M, yy, { align: 'right' });
+    yy += 14;
+    doc.setDrawColor(37, 99, 235); doc.setLineWidth(2); doc.line(M, yy, W - M, yy); yy += 18;
+
+    function tableHeader() {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(37, 99, 235);
+      doc.text('GIORNO', col.day, yy); doc.text('ORARIO', col.when, yy); doc.text('SEDE', col.loc, yy); doc.text('CON CHI', col.who, yy);
+      doc.text('ORE', col.hoursR, yy, { align: 'right' }); doc.text('GUADAGNO', col.payR, yy, { align: 'right' });
+      yy += 6; doc.setDrawColor(225); doc.setLineWidth(0.5); doc.line(M, yy, W - M, yy); yy += 13;
+    }
+    tableHeader();
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    if (!list.length) { doc.setTextColor(120); doc.text('Nessun turno questo mese.', M, yy); yy += 16; }
+    list.forEach((s) => {
+      if (yy > H - 80) { doc.addPage(); yy = M; tableHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); }
       const loc = S.getLocation(s.locationId);
-      const cols = s.colleagueIds.map((id) => (S.getColleague(id) || {}).name).filter(Boolean);
+      const who = s.colleagueIds.map((id) => (S.getColleague(id) || {}).name).filter(Boolean).join(', ');
       const d = S.parseYmd(s.date);
       const dn = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate();
-      const when = s.type === 'bulk' ? (s.label || 'Ore inserite') : ((s.start || '--') + '–' + (s.end || '--'));
-      const stars = s.rating ? ' ' + '★'.repeat(s.rating) : '';
-      return `<tr>
-        <td>${dn}</td><td>${esc(when)}</td><td>${loc ? esc(loc.name) : '—'}</td>
-        <td>${esc(cols.join(', ') || '—')}${stars}</td>
-        <td class="r">${fmtHours(S.shiftHours(s))}</td><td class="r">${euro(S.shiftEarnings(s))}</td>
-      </tr>`;
-    }).join('');
+      const when = s.type === 'bulk' ? (s.label || 'Ore') : ((s.start || '--') + '-' + (s.end || '--'));
+      const rate = s.rating ? ' (' + s.rating + '/5)' : '';
+      doc.setTextColor(15, 23, 42);
+      doc.text(dn, col.day, yy);
+      doc.text(trunc(when, 88), col.when, yy);
+      doc.text(trunc(loc ? loc.name : '-', 104), col.loc, yy);
+      doc.text(trunc((who || '-') + rate, 175), col.who, yy);
+      doc.text(fmtHours(S.shiftHours(s)), col.hoursR, yy, { align: 'right' });
+      doc.setTextColor(22, 163, 74);
+      doc.text(money(S.shiftEarnings(s)), col.payR, yy, { align: 'right' });
+      yy += 7; doc.setDrawColor(238); doc.setLineWidth(0.5); doc.line(M, yy, W - M, yy); yy += 11;
+    });
+    // Totale
+    yy += 3; doc.setDrawColor(37, 99, 235); doc.setLineWidth(1); doc.line(M, yy, W - M, yy); yy += 15;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(15, 23, 42);
+    doc.text('TOTALE', col.day, yy);
+    doc.text(fmtHours(mo.hours), col.hoursR, yy, { align: 'right' });
+    doc.text(money(mo.earnings), col.payR, yy, { align: 'right' });
+    yy += 26;
 
-    const locRows = Object.keys(byLoc).sort((a, b) => byLoc[b].hours - byLoc[a].hours).map((k) => {
-      const loc = S.getLocation(k);
-      return `<tr><td colspan="4">${loc ? esc(loc.name) : 'Senza sede'}</td><td class="r">${fmtHours(byLoc[k].hours)}</td><td class="r">${euro(byLoc[k].earnings)}</td></tr>`;
-    }).join('');
-
+    // Riepilogo per sede
+    const locKeys = Object.keys(byLoc);
+    if (locKeys.length) {
+      if (yy > H - 100) { doc.addPage(); yy = M; }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(15, 23, 42);
+      doc.text('Riepilogo per sede', M, yy); yy += 16;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      locKeys.sort((a, b) => byLoc[b].hours - byLoc[a].hours).forEach((k) => {
+        const loc = S.getLocation(k);
+        doc.setTextColor(15, 23, 42); doc.text(trunc(loc ? loc.name : 'Senza sede', 300), M, yy);
+        doc.text(fmtHours(byLoc[k].hours), col.hoursR, yy, { align: 'right' });
+        doc.setTextColor(22, 163, 74); doc.text(money(byLoc[k].earnings), col.payR, yy, { align: 'right' });
+        yy += 15;
+      });
+    }
+    // Piè di pagina
     const now = new Date();
-    const el = document.createElement('div');
-    el.id = 'print-report';
-    el.innerHTML = `
-      <div class="pr-head">
-        <div><div class="pr-title">Turni Gelateria 🍦</div><div class="pr-sub">${MONTHS[m]} ${y}</div></div>
-        <div class="pr-tot"><div class="pr-tot-n">${euro(mo.earnings)}</div><div class="pr-sub">${fmtHours(mo.hours)} · ${turniLabel(mo.count)}</div></div>
-      </div>
-      <table class="pr-table">
-        <thead><tr><th>Giorno</th><th>Orario</th><th>Sede</th><th>Con chi / voto</th><th class="r">Ore</th><th class="r">Guadagno</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6">Nessun turno questo mese.</td></tr>'}</tbody>
-        <tfoot><tr><th colspan="4">TOTALE</th><th class="r">${fmtHours(mo.hours)}</th><th class="r">${euro(mo.earnings)}</th></tr></tfoot>
-      </table>
-      ${locRows ? `<div class="pr-sub2">Riepilogo per sede</div><table class="pr-table"><tbody>${locRows}</tbody></table>` : ''}
-      <div class="pr-foot">Paga oraria: ${euro(pay)}/h · Generato il ${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}</div>`;
-    document.body.appendChild(el);
-    const cleanup = () => { el.remove(); window.removeEventListener('afterprint', cleanup); };
-    window.addEventListener('afterprint', cleanup);
-    setTimeout(() => { window.print(); setTimeout(cleanup, 1500); }, 60);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(150);
+    doc.text('Paga oraria: ' + money(pay) + '/h  ·  Generato il ' + now.getDate() + '/' + (now.getMonth() + 1) + '/' + now.getFullYear(), M, H - M);
+
+    const blob = doc.output('blob');
+    const fname = 'turni-' + MONTHS[m].toLowerCase() + '-' + y + '.pdf';
+    const file = new File([blob], fname, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Turni ' + MONTHS[m] + ' ' + y }); }
+      catch (e) { /* condivisione annullata: nessun errore */ }
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = fname; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast('PDF salvato ✓');
+    }
   }
 
   function openFinishFromParam() {

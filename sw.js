@@ -1,9 +1,10 @@
 /* Service worker: cache offline dell'app (app shell). I dati stanno in localStorage. */
-const CACHE = 'turni-v7';
+const CACHE = 'turni-v8';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
+  './js/vendor/jspdf.umd.min.js',
   './js/store.js',
   './js/cloud.js',
   './js/app.js',
