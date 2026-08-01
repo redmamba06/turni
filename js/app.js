@@ -84,6 +84,10 @@
     const pay = S.settings().hourlyPay;
     let html = '';
 
+    if (window.Cloud && Cloud.isAdmin && Cloud.isAdmin()) {
+      html += `<div class="card" data-go="admin" style="background:linear-gradient(135deg,var(--yellow),var(--yellow-d));color:#3b2f00;cursor:pointer"><div class="shift-top"><b>👑 Pannello admin</b><span>→</span></div><div style="font-size:13px;margin-top:2px">Controlla ore e guadagni dei dipendenti</div></div>`;
+    }
+
     if (!pay) {
       html += `<div class="card" style="border:1.5px dashed var(--blue)">
         <b>👋 Ciao!</b><p class="muted" style="margin:6px 0 12px">Imposta la tua paga oraria per vedere subito quanto guadagni.</p>
@@ -126,6 +130,7 @@
   function calNow() { return new Date(); }
   function bindHome() {
     $$('[data-go="pay"]').forEach((b) => b.onclick = () => editHourlyPay());
+    $$('[data-go="admin"]').forEach((b) => b.onclick = () => showAdmin());
     bindShiftRows($('#view'));
   }
 
@@ -499,7 +504,9 @@
     else if (ps === 'unsupported') notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche</div><div class="sub">Su iPhone: installa l'app sulla Home per riceverle</div></div><span>📲</span></div>`;
     else notif = `<div class="list-row"><div class="grow"><div class="title">Notifiche di fine turno</div><div class="sub">Attivale per essere avvisata</div></div><div class="toggle" data-act="push-on"></div></div>`;
     const hasName = !!Cloud.name();
+    const adminRow = (Cloud.isAdmin && Cloud.isAdmin()) ? `<div class="list-row" data-act="admin"><div class="grow"><div class="title">Pannello admin 👑</div><div class="sub">Controlla ore e guadagni dei dipendenti</div></div><span>→</span></div>` : '';
     const inner = `<div class="list-row" data-act="edit-name"><div class="grow"><div class="title">${hasName ? esc(Cloud.name()) : 'Aggiungi nome e cognome'}</div><div class="sub">${esc(Cloud.email() || '')}</div></div><span>${hasName ? '✏️' : '⚠️'}</span></div>
+      ${adminRow}
       ${notif}
       <div class="list-row" data-act="change-pass"><div class="grow"><div class="title">Cambia password</div></div><span>🔑</span></div>
       <div class="list-row" data-act="cloud-logout"><div class="grow"><div class="title">Esci</div><div class="sub">Torni alla schermata di accesso</div></div><span>🚪</span></div>`;
@@ -518,6 +525,7 @@
     act('lock', toggleLock);
     act('theme', cycleTheme);
     act('edit-name', editNameFlow);
+    act('admin', showAdmin);
     act('change-pass', changePasswordFlow);
     act('cloud-logout', () => { if (confirm('Vuoi uscire? Tornerai alla schermata di accesso. I dati restano salvati sul cloud.')) { Cloud.logout(); showAuth(); } });
     act('push-on', enablePush);
@@ -724,15 +732,10 @@
   /* ---------- Cloud: sincronizzazione ---------- */
   async function syncFromCloud() {
     if (!(window.Cloud && Cloud.active())) return;
+    // Il cloud è l'unica fonte di verità: carico SOLO i dati dell'utente corrente.
+    // (Niente auto-migrazione dei dati locali: in multi-utente rischierebbe di mischiare dati tra account.)
     const data = await Cloud.pullAll();
-    const cloudEmpty = !data.locations.length && !data.colleagues.length && !data.shifts.length && !data.settings;
-    const localHas = S.shifts().length || S.locations().length || S.colleagues().length;
-    if (cloudEmpty && localHas) {
-      toast('Carico i tuoi dati sul cloud…');
-      await Cloud.migrateFromLocal(S.get());
-    } else {
-      S.replaceFromCloud(data);
-    }
+    S.replaceFromCloud(data);
     applyTheme();
     render();
   }
@@ -795,6 +798,7 @@
   async function afterAuth() {
     $('#auth').classList.add('hidden');
     $('#app').classList.remove('hidden');
+    try { await Cloud.checkAdmin(); } catch (e) {}
     try { await syncFromCloud(); } catch (e) { console.warn(e); }
     render();
     toast('Ciao' + (Cloud.firstName() ? ', ' + Cloud.firstName() : '') + '! 🍦');
@@ -836,17 +840,18 @@
     };
   }
 
-  /* ---------- Export PDF del mese (via stampa) ---------- */
-  async function exportMonthPdf() {
-    if (!(window.jspdf && window.jspdf.jsPDF)) { toast('Libreria PDF non caricata'); return; }
+  /* ---------- Export PDF del mese ---------- */
+  // Costruisce il PDF di un mese. locName(id)->nome sede. Ritorna il documento jsPDF.
+  function buildMonthPdf(opts) {
     const { jsPDF } = window.jspdf;
-    const y = calCursor.getFullYear(), m = calCursor.getMonth();
-    const pay = S.settings().hourlyPay;
-    const mo = S.summaryMonth(calCursor);
-    const list = S.shiftsInMonth(y, m).slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
-    const byLoc = S.hoursByLocation(S.startOfMonth(calCursor), S.endOfMonth(calCursor));
     const money = (n) => (n || 0).toFixed(2).replace('.', ',') + ' €';
-    const authorName = (window.Cloud && Cloud.name && Cloud.name()) || '';
+    const shifts = opts.shifts.slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
+    const pay = opts.pay || 0;
+    const locName = opts.locName || (() => null);
+    let totH = 0; shifts.forEach((s) => { totH += S.shiftHours(s); });
+    const totE = totH * pay;
+    const byLoc = {};
+    shifts.forEach((s) => { const k = s.locationId || '_'; if (!byLoc[k]) byLoc[k] = 0; byLoc[k] += S.shiftHours(s); });
 
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
@@ -854,19 +859,18 @@
     const col = { day: M, when: M + 66, loc: M + 180, hoursR: W - M - 72, payR: W - M };
     const trunc = (t, w) => { const p = doc.splitTextToSize(String(t || ''), w); return p[0] || ''; };
 
-    // Intestazione
     doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(15, 23, 42);
     doc.text('Turni Gelateria', M, yy);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(22, 163, 74);
-    doc.text(money(mo.earnings), W - M, yy, { align: 'right' });
+    doc.text(money(totE), W - M, yy, { align: 'right' });
     yy += 20;
-    if (authorName) {
+    if (opts.authorName) {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
-      doc.text(authorName, M, yy); yy += 16;
+      doc.text(opts.authorName, M, yy); yy += 16;
     }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(100, 116, 139);
-    doc.text(MONTHS[m] + ' ' + y, M, yy);
-    doc.setFontSize(10); doc.text(fmtHours(mo.hours) + ' · ' + turniLabel(mo.count), W - M, yy, { align: 'right' });
+    doc.text(opts.monthLabel, M, yy);
+    doc.setFontSize(10); doc.text(fmtHours(totH) + ' · ' + turniLabel(shifts.length), W - M, yy, { align: 'right' });
     yy += 14;
     doc.setDrawColor(37, 99, 235); doc.setLineWidth(2); doc.line(M, yy, W - M, yy); yy += 18;
 
@@ -878,63 +882,162 @@
     }
     tableHeader();
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-    if (!list.length) { doc.setTextColor(120); doc.text('Nessun turno questo mese.', M, yy); yy += 16; }
-    list.forEach((s) => {
+    if (!shifts.length) { doc.setTextColor(120); doc.text('Nessun turno questo mese.', M, yy); yy += 16; }
+    shifts.forEach((s) => {
       if (yy > H - 80) { doc.addPage(); yy = M; tableHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); }
-      const loc = S.getLocation(s.locationId);
       const d = S.parseYmd(s.date);
       const dn = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate();
       const when = s.type === 'bulk' ? (s.label || 'Ore') : ((s.start || '--') + '-' + (s.end || '--'));
       const rate = s.rating ? ' (' + s.rating + '/5)' : '';
+      const nm = locName(s.locationId);
       doc.setTextColor(15, 23, 42);
       doc.text(dn, col.day, yy);
       doc.text(trunc(when + rate, 108), col.when, yy);
-      doc.text(trunc(loc ? loc.name : '-', 255), col.loc, yy);
+      doc.text(trunc(nm || '-', 255), col.loc, yy);
       doc.text(fmtHours(S.shiftHours(s)), col.hoursR, yy, { align: 'right' });
       doc.setTextColor(22, 163, 74);
-      doc.text(money(S.shiftEarnings(s)), col.payR, yy, { align: 'right' });
+      doc.text(money(S.shiftHours(s) * pay), col.payR, yy, { align: 'right' });
       yy += 7; doc.setDrawColor(238); doc.setLineWidth(0.5); doc.line(M, yy, W - M, yy); yy += 11;
     });
-    // Totale
     yy += 3; doc.setDrawColor(37, 99, 235); doc.setLineWidth(1); doc.line(M, yy, W - M, yy); yy += 15;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(15, 23, 42);
     doc.text('TOTALE', col.day, yy);
-    doc.text(fmtHours(mo.hours), col.hoursR, yy, { align: 'right' });
-    doc.text(money(mo.earnings), col.payR, yy, { align: 'right' });
+    doc.text(fmtHours(totH), col.hoursR, yy, { align: 'right' });
+    doc.text(money(totE), col.payR, yy, { align: 'right' });
     yy += 26;
 
-    // Riepilogo per sede
     const locKeys = Object.keys(byLoc);
     if (locKeys.length) {
       if (yy > H - 100) { doc.addPage(); yy = M; }
       doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(15, 23, 42);
       doc.text('Riepilogo per sede', M, yy); yy += 16;
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-      locKeys.sort((a, b) => byLoc[b].hours - byLoc[a].hours).forEach((k) => {
-        const loc = S.getLocation(k);
-        doc.setTextColor(15, 23, 42); doc.text(trunc(loc ? loc.name : 'Senza sede', 300), M, yy);
-        doc.text(fmtHours(byLoc[k].hours), col.hoursR, yy, { align: 'right' });
-        doc.setTextColor(22, 163, 74); doc.text(money(byLoc[k].earnings), col.payR, yy, { align: 'right' });
+      locKeys.sort((a, b) => byLoc[b] - byLoc[a]).forEach((k) => {
+        doc.setTextColor(15, 23, 42); doc.text(trunc(k === '_' ? 'Senza sede' : (locName(k) || 'Senza sede'), 300), M, yy);
+        doc.text(fmtHours(byLoc[k]), col.hoursR, yy, { align: 'right' });
+        doc.setTextColor(22, 163, 74); doc.text(money(byLoc[k] * pay), col.payR, yy, { align: 'right' });
         yy += 15;
       });
     }
-    // Piè di pagina
     const now = new Date();
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(150);
     doc.text('Paga oraria: ' + money(pay) + '/h  ·  Generato il ' + now.getDate() + '/' + (now.getMonth() + 1) + '/' + now.getFullYear(), M, H - M);
+    return doc;
+  }
 
+  async function sharePdf(doc, fname, title) {
     const blob = doc.output('blob');
-    const fname = 'turni-' + MONTHS[m].toLowerCase() + '-' + y + '.pdf';
     const file = new File([blob], fname, { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'Turni ' + MONTHS[m] + ' ' + y }); }
-      catch (e) { /* condivisione annullata: nessun errore */ }
+      try { await navigator.share({ files: [file], title }); } catch (e) { /* annullato */ }
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = fname; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1500);
       toast('PDF salvato ✓');
     }
+  }
+
+  async function exportMonthPdf() {
+    if (!(window.jspdf && window.jspdf.jsPDF)) { toast('Libreria PDF non caricata'); return; }
+    const y = calCursor.getFullYear(), m = calCursor.getMonth();
+    const doc = buildMonthPdf({
+      authorName: (window.Cloud && Cloud.name && Cloud.name()) || '',
+      monthLabel: MONTHS[m] + ' ' + y,
+      shifts: S.shiftsInMonth(y, m),
+      pay: S.settings().hourlyPay,
+      locName: (id) => { const l = S.getLocation(id); return l ? l.name : null; },
+    });
+    await sharePdf(doc, 'turni-' + MONTHS[m].toLowerCase() + '-' + y + '.pdf', 'Turni ' + MONTHS[m] + ' ' + y);
+  }
+
+  /* ================= PANNELLO ADMIN ================= */
+  let adminCursor = new Date();
+  let adminMonth = null;
+
+  function showAdmin() {
+    if (!(window.Cloud && Cloud.isAdmin && Cloud.isAdmin())) { toast('Solo per l\'amministratore'); return; }
+    $('#admin').classList.remove('hidden');
+    renderAdmin();
+  }
+  function closeAdmin() { $('#admin').classList.add('hidden'); $('#admin').innerHTML = ''; }
+
+  async function renderAdmin() {
+    const el = $('#admin');
+    const y = adminCursor.getFullYear(), m = adminCursor.getMonth();
+    el.innerHTML = `<div class="admin-top"><button class="admin-back" id="adm-back">←</button><h1>Pannello admin 👑</h1></div>
+      <div class="cal-head" style="margin-top:2px"><div class="m">${MONTHS[m]} ${y}</div>
+        <div class="cal-nav"><button data-am="-1">‹</button><button data-am="1">›</button></div></div>
+      <div id="adm-body"><div class="empty"><div class="big">⏳</div>Carico i dati…</div></div>`;
+    $('#adm-back').onclick = closeAdmin;
+    $$('#admin [data-am]').forEach((b) => b.onclick = () => { adminCursor = new Date(y, m + Number(b.dataset.am), 1); renderAdmin(); });
+
+    let profiles, data;
+    try {
+      const from = S.ymd(S.startOfMonth(adminCursor)), to = S.ymd(S.endOfMonth(adminCursor));
+      [profiles, data] = await Promise.all([Cloud.adminListProfiles(), Cloud.adminMonthData(from, to)]);
+    } catch (e) { $('#adm-body').innerHTML = `<div class="empty">Errore: ${esc(e.message)}</div>`; return; }
+
+    const perUser = {};
+    profiles.forEach((p) => { perUser[p.id] = { p, hours: 0, earnings: 0, shifts: [] }; });
+    data.shifts.forEach((s) => {
+      if (!perUser[s.userId]) perUser[s.userId] = { p: { id: s.userId, full_name: '', email: '(senza profilo)' }, hours: 0, earnings: 0, shifts: [] };
+      const h = S.shiftHours(s); const pay = data.payByUser[s.userId] || 0;
+      perUser[s.userId].hours += h; perUser[s.userId].earnings += h * pay; perUser[s.userId].shifts.push(s);
+    });
+    const users = Object.values(perUser).sort((a, b) => b.earnings - a.earnings || b.hours - a.hours);
+    let teamH = 0, teamE = 0; users.forEach((u) => { teamH += u.hours; teamE += u.earnings; });
+    adminMonth = { perUser, locations: data.locations, payByUser: data.payByUser };
+
+    let html = `<div class="hero" style="margin-top:4px">
+      <div class="label">TOTALE TEAM · ${MONTHS[m].toUpperCase()}</div>
+      <div class="money">${euro(teamE)}</div>
+      <div class="sub">${fmtHours(teamH)} · ${users.filter((u) => u.shifts.length).length} dipendenti attivi</div>
+    </div>`;
+    html += `<div class="section-title">Dipendenti (${users.length})</div>`;
+    users.forEach((u) => {
+      const nm = (u.p.full_name && u.p.full_name.trim()) || u.p.email || '(sconosciuto)';
+      const initials = nm.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?';
+      html += `<div class="emp-card" data-emp="${u.p.id}">
+        <div class="emp-avatar">${esc(initials)}</div>
+        <div class="emp-main"><div class="emp-name">${esc(nm)}${u.p.is_admin ? '<span class="badge-admin">ADMIN</span>' : ''}</div><div class="emp-sub">${esc(u.p.email || '')}</div></div>
+        <div class="emp-fig"><div class="e">${euro(u.earnings)}</div><div class="h">${fmtHours(u.hours)}</div></div>
+      </div>`;
+    });
+    if (!users.length) html += `<div class="empty">Nessun dipendente registrato.</div>`;
+    $('#adm-body').innerHTML = html;
+    $$('#admin .emp-card').forEach((c) => c.onclick = () => showEmployee(c.dataset.emp));
+  }
+
+  function showEmployee(uid) {
+    if (!adminMonth || !adminMonth.perUser[uid]) return;
+    const u = adminMonth.perUser[uid];
+    const y = adminCursor.getFullYear(), m = adminCursor.getMonth();
+    const nm = (u.p.full_name && u.p.full_name.trim()) || u.p.email || '(sconosciuto)';
+    const pay = adminMonth.payByUser[uid] || 0;
+    const locName = (id) => (adminMonth.locations[id] || {}).name;
+    const shifts = u.shifts.slice().sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
+    const rows = shifts.map((s) => {
+      const d = S.parseYmd(s.date); const dn = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate();
+      const when = s.type === 'bulk' ? ('📦 ' + (s.label || 'Ore')) : ((s.start || '--') + ' → ' + (s.end || '--'));
+      const ln = locName(s.locationId); const lc = (adminMonth.locations[s.locationId] || {}).color || 'var(--blue)';
+      return `<div class="shift-item"><div class="shift-bar" style="background:${lc}"></div>
+        <div class="shift-main"><div class="shift-top"><span class="shift-time">${esc(when)}</span><span class="shift-pay">${euro(S.shiftHours(s) * pay)}</span></div>
+        <div class="shift-meta"><span>${dn}</span><span>${fmtHours(S.shiftHours(s))}</span>${ln ? `<span>${esc(ln)}</span>` : ''}${s.rating ? `<span class="stars-mini">${'★'.repeat(s.rating)}</span>` : ''}</div></div></div>`;
+    }).join('') || '<div class="empty" style="padding:20px">Nessun turno questo mese.</div>';
+
+    openSheet(`<h2>${esc(nm)}</h2><p class="sub">${MONTHS[m]} ${y} · paga ${euro(pay)}/h</p>
+      <div class="stat-grid">
+        <div class="stat"><div class="n">${fmtHours(u.hours)}</div><div class="t">Ore lavorate</div></div>
+        <div class="stat"><div class="n">${euro(u.earnings)}</div><div class="t">Da pagare</div></div>
+      </div>
+      <div class="section-title">Turni del mese</div>${rows}
+      <button class="btn" id="emp-pdf" style="margin-top:14px">📄 Esporta PDF</button>`);
+    $('#emp-pdf').onclick = async () => {
+      if (!(window.jspdf && window.jspdf.jsPDF)) { toast('Libreria PDF non caricata'); return; }
+      const doc = buildMonthPdf({ authorName: nm, monthLabel: MONTHS[m] + ' ' + y, shifts, pay, locName });
+      await sharePdf(doc, 'turni-' + nm.toLowerCase().replace(/\s+/g, '-') + '-' + MONTHS[m].toLowerCase() + '-' + y + '.pdf', 'Turni ' + nm);
+    };
   }
 
   function openFinishFromParam() {
@@ -967,7 +1070,7 @@
     if (window.Cloud && Cloud.loggedIn()) {
       // Già loggata: mostra l'app (o il PIN) e sincronizza
       if (S.settings().lockEnabled) showLock(); else $('#app').classList.remove('hidden');
-      try { await Cloud.loadUser(); await syncFromCloud(); } catch (e) { console.warn('sync iniziale', e); }
+      try { await Cloud.loadUser(); await Cloud.checkAdmin(); await syncFromCloud(); } catch (e) { console.warn('sync iniziale', e); }
       openFinishFromParam();
       if (Cloud.active() && !Cloud.name()) setTimeout(editNameFlow, 600);
     } else {

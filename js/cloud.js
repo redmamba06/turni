@@ -206,8 +206,12 @@
 
   /* ---------- API di alto livello usata da store/app ---------- */
   async function pullAll() {
+    // Filtra sempre sul proprio user_id: la vista personale mostra SOLO i propri dati
+    // (un admin, con le policy di lettura estese, altrimenti vedrebbe tutti qui).
+    const uid = userId();
+    const mine = (t) => rest(t + '?select=*&user_id=eq.' + uid).then((r) => { if (!r.ok) throw new Error('load ' + t); return r.json(); });
     const [locs, cols, shifts, setRows] = await Promise.all([
-      selectAll('locations'), selectAll('colleagues'), selectAll('shifts'), selectAll('settings'),
+      mine('locations'), mine('colleagues'), mine('shifts'), mine('settings'),
     ]);
     const s = setRows[0];
     return {
@@ -251,6 +255,35 @@
     return fetch(cfg.url + '/functions/v1/' + slug, { method: 'POST', headers: headers(true), body: JSON.stringify(body || {}) });
   }
 
+  /* ---------- Admin ---------- */
+  function isAdmin() { return !!(me && me.isAdmin); }
+  async function checkAdmin() {
+    if (!loggedIn() || !userId()) return false;
+    try {
+      const r = await rest('profiles?id=eq.' + userId() + '&select=is_admin');
+      if (r.ok) { const a = await r.json(); if (me) me.isAdmin = !!(a[0] && a[0].is_admin); }
+    } catch (e) { /* ignora */ }
+    return isAdmin();
+  }
+  async function adminListProfiles() {
+    const r = await rest('profiles?select=id,full_name,first_name,last_name,email,is_admin&order=full_name.asc');
+    if (!r.ok) throw new Error('profili: ' + await r.text());
+    return r.json();
+  }
+  // Dati di tutti i dipendenti per un mese (solo admin, grazie alle policy RLS)
+  async function adminMonthData(fromYmd, toYmd) {
+    const [shiftsR, setR, locR] = await Promise.all([
+      rest('shifts?select=*&date=gte.' + fromYmd + '&date=lte.' + toYmd),
+      rest('settings?select=user_id,hourly_pay'),
+      rest('locations?select=*'),
+    ]);
+    if (!shiftsR.ok) throw new Error('turni: ' + await shiftsR.text());
+    const shifts = (await shiftsR.json()).map((d) => { const o = shiftFromDb(d); o.userId = d.user_id; return o; });
+    const payByUser = {}; if (setR.ok) (await setR.json()).forEach((s) => { payByUser[s.user_id] = Number(s.hourly_pay) || 0; });
+    const locations = {}; if (locR.ok) (await locR.json()).forEach((l) => { locations[l.id] = { name: l.name, color: l.color }; });
+    return { shifts, payByUser, locations };
+  }
+
   global.Cloud = {
     configured, loggedIn, active, email, userId, name, firstName, tz,
     setConfig, clearConfig, sendMagicLink, verifyCode, captureRedirect, loadUser, logout,
@@ -258,5 +291,6 @@
     pullAll, migrateFromLocal,
     pushShift, removeShift, pushLocation, removeLocation, pushColleague, removeColleague, pushSettings,
     saveSubscription, deleteSubscription, invokeFunction,
+    isAdmin, checkAdmin, adminListProfiles, adminMonthData,
   };
 })(window);
