@@ -477,6 +477,10 @@
           <div class="grow"><div class="title">Blocco con PIN</div><div class="sub">${st.lockEnabled ? 'Attivo' : 'Disattivato'}</div></div>
           <div class="toggle ${st.lockEnabled ? 'on' : ''}" data-act="lock"></div>
         </div>
+        ${(st.lockEnabled && bioSupported()) ? `<div class="list-row">
+          <div class="grow"><div class="title">Sblocca con Face ID / impronta</div><div class="sub">${st.biometric ? 'Attivo · più comodo del PIN' : 'Usa la biometria del telefono'}</div></div>
+          <div class="toggle ${st.biometric ? 'on' : ''}" data-act="bio"></div>
+        </div>` : ''}
         <div class="list-row" data-act="theme">
           <div class="grow"><div class="title">Tema</div><div class="sub">${{ auto: 'Automatico', light: 'Chiaro', dark: 'Scuro' }[st.theme]}</div></div>
           <span>${{ auto: '🌓', light: '☀️', dark: '🌙' }[st.theme]}</span>
@@ -523,6 +527,7 @@
     act('export', exportBackup);
     act('import', importBackup);
     act('lock', toggleLock);
+    act('bio', () => { if (S.settings().biometric) disableBiometric(); else enrollBiometric(); });
     act('theme', cycleTheme);
     act('edit-name', editNameFlow);
     act('admin', showAdmin);
@@ -597,7 +602,7 @@
   /* ---------- Lock / PIN ---------- */
   function toggleLock() {
     if (S.settings().lockEnabled) {
-      if (confirm('Disattivare il blocco con PIN?')) { S.clearPin(); render(); }
+      if (confirm('Disattivare il blocco con PIN?')) { S.clearPin(); S.updateSettings({ biometric: false, bioCredId: null }); render(); }
     } else {
       setupPin();
     }
@@ -623,25 +628,32 @@
     $('#app').classList.add('hidden');
     const lock = $('#lock'); lock.classList.remove('hidden');
     pinBuffer = '';
+    $('#lock-msg').textContent = 'Inserisci il PIN';
     renderPinPad();
-    tryBiometric();
+    const bioBtn = $('#lock-bio');
+    if (S.settings().biometric && S.settings().bioCredId && bioSupported()) {
+      bioBtn.classList.remove('hidden'); bioBtn.onclick = tryBiometric;
+      setTimeout(tryBiometric, 300); // chiede subito il Face ID
+    } else {
+      bioBtn.classList.add('hidden');
+    }
   }
   function renderPinPad() {
     const dots = $('#pin-dots');
     dots.innerHTML = [0, 1, 2, 3].map((i) => `<i class="${i < pinBuffer.length ? 'on' : ''}"></i>`).join('');
     const pad = $('#pin-pad');
-    if (!pad.dataset.built) {
-      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'bio', '0', 'del'];
-      pad.innerHTML = keys.map((k) => {
-        if (k === 'bio') return `<button class="blank" data-k="bio">😊</button>`;
-        if (k === 'del') return `<button data-k="del">⌫</button>`;
-        return `<button data-k="${k}">${k}</button>`;
-      }).join('');
-      pad.dataset.built = '1';
-      $$('#pin-pad button').forEach((b) => b.onclick = () => onPinKey(b.dataset.k));
-    }
+    const hasBio = S.settings().biometric && S.settings().bioCredId && bioSupported();
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', hasBio ? 'bio' : 'blank', '0', 'del'];
+    pad.innerHTML = keys.map((k) => {
+      if (k === 'bio') return `<button data-k="bio">😊</button>`;
+      if (k === 'blank') return `<button class="blank" data-k=""></button>`;
+      if (k === 'del') return `<button data-k="del">⌫</button>`;
+      return `<button data-k="${k}">${k}</button>`;
+    }).join('');
+    $$('#pin-pad button').forEach((b) => b.onclick = () => onPinKey(b.dataset.k));
   }
   async function onPinKey(k) {
+    if (!k) return;
     if (k === 'del') { pinBuffer = pinBuffer.slice(0, -1); renderPinPad(); return; }
     if (k === 'bio') { tryBiometric(); return; }
     if (pinBuffer.length >= 4) return;
@@ -653,7 +665,45 @@
     }
   }
   function unlock() { $('#lock').classList.add('hidden'); $('#app').classList.remove('hidden'); }
-  async function tryBiometric() { /* opzionale: Face ID/impronta via WebAuthn — abilitato in futuro */ }
+
+  /* ---------- Face ID / impronta (WebAuthn) ---------- */
+  function bioSupported() { return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create); }
+  function ab2b64(buf) { let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); }
+  function b642ab(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
+
+  async function enrollBiometric() {
+    if (!S.settings().lockEnabled) { toast('Prima attiva il blocco con PIN'); return; }
+    if (!bioSupported()) { toast('Non disponibile su questo dispositivo'); return; }
+    try {
+      const cred = await navigator.credentials.create({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { name: 'Turni Gelateria', id: location.hostname },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: (window.Cloud && Cloud.email && Cloud.email()) || 'utente', displayName: (window.Cloud && Cloud.name && Cloud.name()) || 'Utente' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+        timeout: 60000, attestation: 'none',
+      } });
+      if (!cred) { toast('Attivazione annullata'); return; }
+      S.updateSettings({ biometric: true, bioCredId: ab2b64(cred.rawId) });
+      toast('Sblocco con Face ID attivo 😊'); render();
+    } catch (e) { console.warn('bio enroll', e); toast('Impossibile attivare (permesso negato?)'); }
+  }
+  function disableBiometric() { S.updateSettings({ biometric: false, bioCredId: null }); toast('Face ID disattivato'); render(); }
+
+  async function tryBiometric() {
+    const st = S.settings();
+    if (!(st.biometric && st.bioCredId && bioSupported())) return;
+    $('#lock-msg').textContent = 'Sblocca con Face ID…';
+    try {
+      const assertion = await navigator.credentials.get({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ type: 'public-key', id: b642ab(st.bioCredId), transports: ['internal'] }],
+        userVerification: 'required', timeout: 60000, rpId: location.hostname,
+      } });
+      if (assertion) unlock();
+      else $('#lock-msg').textContent = 'Inserisci il PIN';
+    } catch (e) { $('#lock-msg').textContent = 'Inserisci il PIN'; /* fallback al PIN */ }
+  }
 
   /* ---------- Download helper ---------- */
   function download(filename, text, mime) {
