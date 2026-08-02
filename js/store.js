@@ -13,8 +13,6 @@
       lockEnabled: false,
       pinHash: null,
       pinSalt: null,
-      biometric: false,
-      bioCredId: null,
     },
     locations: [],   // {id, name, color}
     colleagues: [],  // {id, name}

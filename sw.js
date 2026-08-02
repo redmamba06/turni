@@ -1,5 +1,5 @@
 /* Service worker: cache offline dell'app (app shell). I dati stanno in localStorage. */
-const CACHE = "turni-v12";
+const CACHE = "turni-v13";
 const ASSETS = [
   './',
   './index.html',
