@@ -841,8 +841,9 @@
   }
   async function afterAuth() {
     $('#auth').classList.add('hidden');
-    $('#app').classList.remove('hidden');
     try { await Cloud.checkAdmin(); } catch (e) {}
+    if (adminIsBoss()) { showAdmin(); return; }
+    $('#app').classList.remove('hidden');
     try { await syncFromCloud(); } catch (e) { console.warn(e); }
     render();
     toast('Ciao' + (Cloud.firstName() ? ', ' + Cloud.firstName() : '') + '! 🍦');
@@ -999,6 +1000,8 @@
   let adminCursor = new Date();
   let adminMonth = null;
 
+  function adminIsBoss() { return !!(window.Cloud && Cloud.isAdmin() && !Cloud.isSuper()); }
+
   function showAdmin() {
     if (!(window.Cloud && Cloud.isAdmin && Cloud.isAdmin())) { toast('Solo per l\'amministratore'); return; }
     $('#admin').classList.remove('hidden');
@@ -1006,14 +1009,24 @@
   }
   function closeAdmin() { $('#admin').classList.add('hidden'); $('#admin').innerHTML = ''; }
 
+  function bossMenu() {
+    openSheet(`<h2>Account</h2><p class="sub">${esc((Cloud.name && Cloud.name()) || Cloud.email() || '')}</p>
+      <button class="btn secondary" id="bm-pass">Cambia password</button>
+      <button class="btn danger" id="bm-out">Esci</button>`);
+    $('#bm-pass').onclick = () => { closeSheet(); changePasswordFlow(); };
+    $('#bm-out').onclick = () => { if (confirm('Vuoi uscire?')) { closeSheet(); Cloud.logout(); closeAdmin(); showAuth(); } };
+  }
+
   async function renderAdmin() {
     const el = $('#admin');
+    const boss = adminIsBoss();
     const y = adminCursor.getFullYear(), m = adminCursor.getMonth();
-    el.innerHTML = `<div class="admin-top"><button class="admin-back" id="adm-back">←</button><h1>Pannello admin 👑</h1></div>
+    const headBtn = boss ? `<button class="admin-back" id="adm-menu">⋯</button>` : `<button class="admin-back" id="adm-back">←</button>`;
+    el.innerHTML = `<div class="admin-top">${headBtn}<h1>${boss ? 'Paghe dipendenti 👑' : 'Pannello admin 👑'}</h1></div>
       <div class="cal-head" style="margin-top:2px"><div class="m">${MONTHS[m]} ${y}</div>
         <div class="cal-nav"><button data-am="-1">‹</button><button data-am="1">›</button></div></div>
       <div id="adm-body"><div class="empty"><div class="big">⏳</div>Carico i dati…</div></div>`;
-    $('#adm-back').onclick = closeAdmin;
+    if (boss) $('#adm-menu').onclick = bossMenu; else $('#adm-back').onclick = closeAdmin;
     $$('#admin [data-am]').forEach((b) => b.onclick = () => { adminCursor = new Date(y, m + Number(b.dataset.am), 1); renderAdmin(); });
 
     let profiles, data;
@@ -1022,21 +1035,26 @@
       [profiles, data] = await Promise.all([Cloud.adminListProfiles(), Cloud.adminMonthData(from, to)]);
     } catch (e) { $('#adm-body').innerHTML = `<div class="empty">Errore: ${esc(e.message)}</div>`; return; }
 
+    // Solo dipendenti (niente admin); il datore vede solo i turni GIÀ FATTI (fino a oggi)
+    const emp = profiles.filter((p) => !p.is_admin);
+    const todayS = todayStr();
+    const shifts = boss ? data.shifts.filter((s) => s.date <= todayS) : data.shifts;
+
     const perUser = {};
-    profiles.forEach((p) => { perUser[p.id] = { p, hours: 0, earnings: 0, shifts: [] }; });
-    data.shifts.forEach((s) => {
-      if (!perUser[s.userId]) perUser[s.userId] = { p: { id: s.userId, full_name: '', email: '(senza profilo)' }, hours: 0, earnings: 0, shifts: [] };
+    emp.forEach((p) => { perUser[p.id] = { p, hours: 0, earnings: 0, shifts: [] }; });
+    shifts.forEach((s) => {
+      const u = perUser[s.userId]; if (!u) return;
       const h = S.shiftHours(s); const pay = data.payByUser[s.userId] || 0;
-      perUser[s.userId].hours += h; perUser[s.userId].earnings += h * pay; perUser[s.userId].shifts.push(s);
+      u.hours += h; u.earnings += h * pay; u.shifts.push(s);
     });
     const users = Object.values(perUser).sort((a, b) => b.earnings - a.earnings || b.hours - a.hours);
     let teamH = 0, teamE = 0; users.forEach((u) => { teamH += u.hours; teamE += u.earnings; });
-    adminMonth = { perUser, locations: data.locations, payByUser: data.payByUser };
+    adminMonth = { perUser, locations: data.locations, payByUser: data.payByUser, boss };
 
     let html = `<div class="hero" style="margin-top:4px">
-      <div class="label">TOTALE TEAM · ${MONTHS[m].toUpperCase()}</div>
+      <div class="label">${boss ? 'DA PAGARE · ' : 'TOTALE TEAM · '}${MONTHS[m].toUpperCase()}</div>
       <div class="money">${euro(teamE)}</div>
-      <div class="sub">${fmtHours(teamH)} · ${users.filter((u) => u.shifts.length).length} dipendenti attivi</div>
+      <div class="sub">${fmtHours(teamH)} · ${users.filter((u) => u.shifts.length).length} dipendenti${boss ? ' · turni già fatti' : ''}</div>
     </div>`;
     html += `<div class="section-title">Dipendenti (${users.length})</div>`;
     users.forEach((u) => {
@@ -1044,11 +1062,11 @@
       const initials = nm.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?';
       html += `<div class="emp-card" data-emp="${u.p.id}">
         <div class="emp-avatar">${esc(initials)}</div>
-        <div class="emp-main"><div class="emp-name">${esc(nm)}${u.p.is_admin ? '<span class="badge-admin">ADMIN</span>' : ''}</div><div class="emp-sub">${esc(u.p.email || '')}</div></div>
+        <div class="emp-main"><div class="emp-name">${esc(nm)}</div><div class="emp-sub">${esc(u.p.email || '')}</div></div>
         <div class="emp-fig"><div class="e">${euro(u.earnings)}</div><div class="h">${fmtHours(u.hours)}</div></div>
       </div>`;
     });
-    if (!users.length) html += `<div class="empty">Nessun dipendente registrato.</div>`;
+    if (!users.length) html += `<div class="empty">Nessun dipendente${boss ? ' con turni da pagare' : ''}.</div>`;
     $('#adm-body').innerHTML = html;
     $$('#admin .emp-card').forEach((c) => c.onclick = () => showEmployee(c.dataset.emp));
   }
@@ -1068,19 +1086,34 @@
       return `<div class="shift-item"><div class="shift-bar" style="background:${lc}"></div>
         <div class="shift-main"><div class="shift-top"><span class="shift-time">${esc(when)}</span><span class="shift-pay">${euro(S.shiftHours(s) * pay)}</span></div>
         <div class="shift-meta"><span>${dn}</span><span>${fmtHours(S.shiftHours(s))}</span>${ln ? `<span>${esc(ln)}</span>` : ''}${s.rating ? `<span class="stars-mini">${'★'.repeat(s.rating)}</span>` : ''}</div></div></div>`;
-    }).join('') || '<div class="empty" style="padding:20px">Nessun turno questo mese.</div>';
+    }).join('') || `<div class="empty" style="padding:20px">Nessun turno${adminMonth.boss ? ' già fatto' : ''} questo mese.</div>`;
 
     openSheet(`<h2>${esc(nm)}</h2><p class="sub">${MONTHS[m]} ${y} · paga ${euro(pay)}/h</p>
       <div class="stat-grid">
-        <div class="stat"><div class="n">${fmtHours(u.hours)}</div><div class="t">Ore lavorate</div></div>
+        <div class="stat"><div class="n">${fmtHours(u.hours)}</div><div class="t">Ore${adminMonth.boss ? ' fatte' : ' lavorate'}</div></div>
         <div class="stat"><div class="n">${euro(u.earnings)}</div><div class="t">Da pagare</div></div>
       </div>
-      <div class="section-title">Turni del mese</div>${rows}
+      <button class="btn secondary" id="emp-pay">💶 Modifica paga oraria</button>
+      <div class="section-title">Turni${adminMonth.boss ? ' già fatti' : ' del mese'}</div>${rows}
       <button class="btn" id="emp-pdf" style="margin-top:14px">📄 Esporta PDF</button>`);
+    $('#emp-pay').onclick = () => adminSetPayFlow(uid, pay, nm);
     $('#emp-pdf').onclick = async () => {
       if (!(window.jspdf && window.jspdf.jsPDF)) { toast('Libreria PDF non caricata'); return; }
       const doc = buildMonthPdf({ authorName: nm, monthLabel: MONTHS[m] + ' ' + y, shifts, pay, locName });
       await sharePdf(doc, 'turni-' + nm.toLowerCase().replace(/\s+/g, '-') + '-' + MONTHS[m].toLowerCase() + '-' + y + '.pdf', 'Turni ' + nm);
+    };
+  }
+
+  function adminSetPayFlow(uid, currentPay, nm) {
+    openSheet(`<h2>Paga oraria</h2><p class="sub">${esc(nm || '')} — quanto guadagna all'ora.</p>
+      <div class="field"><label>Euro all'ora</label><input type="text" id="ap" inputmode="decimal" autocomplete="off" value="${currentPay ? String(currentPay).replace('.', ',') : ''}" placeholder="es. 8,50"></div>
+      <button class="btn" id="ap-save">Salva</button>`);
+    $('#ap').focus();
+    $('#ap-save').onclick = async () => {
+      const v = Number(String($('#ap').value).replace(',', '.')) || 0;
+      const b = $('#ap-save'); b.textContent = 'Salvo…'; b.disabled = true;
+      try { await Cloud.adminSetPay(uid, v); closeSheet(); toast('Paga aggiornata ✓'); renderAdmin(); }
+      catch (e) { toast('Errore: ' + e.message); b.textContent = 'Salva'; b.disabled = false; }
     };
   }
 
@@ -1112,11 +1145,16 @@
     }
 
     if (window.Cloud && Cloud.loggedIn()) {
-      // Già loggata: mostra l'app (o il PIN) e sincronizza
-      if (S.settings().lockEnabled) showLock(); else $('#app').classList.remove('hidden');
-      try { await Cloud.loadUser(); await Cloud.checkAdmin(); await syncFromCloud(); } catch (e) { console.warn('sync iniziale', e); }
-      openFinishFromParam();
-      if (Cloud.active() && !Cloud.name()) setTimeout(editNameFlow, 600);
+      try { await Cloud.loadUser(); await Cloud.checkAdmin(); } catch (e) { console.warn(e); }
+      if (adminIsBoss()) {
+        // Datore di lavoro: solo il pannello paghe, niente app dipendente
+        showAdmin();
+      } else {
+        if (S.settings().lockEnabled) showLock(); else $('#app').classList.remove('hidden');
+        try { await syncFromCloud(); } catch (e) { console.warn('sync iniziale', e); }
+        openFinishFromParam();
+        if (Cloud.active() && !Cloud.name()) setTimeout(editNameFlow, 600);
+      }
     } else {
       // Non loggata: schermata di accesso
       showAuth();

@@ -267,18 +267,24 @@
 
   /* ---------- Admin ---------- */
   function isAdmin() { return !!(me && me.isAdmin); }
+  function isSuper() { return !!(me && me.isSuper); }
   async function checkAdmin() {
     if (!loggedIn() || !userId()) return false;
     try {
-      const r = await rest('profiles?id=eq.' + userId() + '&select=is_admin');
-      if (r.ok) { const a = await r.json(); if (me) me.isAdmin = !!(a[0] && a[0].is_admin); }
+      const r = await rest('profiles?id=eq.' + userId() + '&select=is_admin,is_super');
+      if (r.ok) { const a = await r.json(); if (me) { me.isAdmin = !!(a[0] && a[0].is_admin); me.isSuper = !!(a[0] && a[0].is_super); } }
     } catch (e) { /* ignora */ }
     return isAdmin();
   }
   async function adminListProfiles() {
-    const r = await rest('profiles?select=id,full_name,first_name,last_name,email,is_admin&order=full_name.asc');
+    const r = await rest('profiles?select=id,full_name,first_name,last_name,email,is_admin,is_super&order=full_name.asc');
     if (!r.ok) throw new Error('profili: ' + await r.text());
     return r.json();
+  }
+  // Imposta la paga oraria di un dipendente (solo admin)
+  async function adminSetPay(uid, pay) {
+    const r = await rest('settings?on_conflict=user_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: uid, hourly_pay: pay }) });
+    if (!r.ok) throw new Error('paga: ' + await r.text());
   }
   // Dati di tutti i dipendenti per un mese (solo admin, grazie alle policy RLS)
   async function adminMonthData(fromYmd, toYmd) {
@@ -301,6 +307,6 @@
     pullAll, migrateFromLocal,
     pushShift, removeShift, pushLocation, removeLocation, pushColleague, removeColleague, pushSettings,
     saveSubscription, deleteSubscription, invokeFunction,
-    isAdmin, checkAdmin, adminListProfiles, adminMonthData,
+    isAdmin, isSuper, checkAdmin, adminListProfiles, adminMonthData, adminSetPay,
   };
 })(window);
