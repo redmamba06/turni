@@ -283,6 +283,101 @@ input, select, textarea { font-family: inherit; font-size: 16px; }
 :root[data-theme="dark"] .toast { background: #1E293B; }
 @keyframes pop { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+/* =====================================================================
+   STILE APPLE GLASS (liquid glass) — superfici traslucide + sfocatura
+   Aggiunto in coda: sovrascrive le superfici base senza !important,
+   così gli stati (.selected/.on/.active, più specifici) restano validi.
+   ===================================================================== */
+:root {
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-2: rgba(255, 255, 255, 0.68);
+  --glass-input: rgba(255, 255, 255, 0.45);
+  --glass-brd: rgba(255, 255, 255, 0.6);
+  --glass-blur: blur(22px) saturate(180%);
+  --glass-shadow: 0 10px 30px rgba(15, 23, 42, .12);
+}
+:root[data-theme="dark"] {
+  --glass: rgba(24, 33, 52, 0.55);
+  --glass-2: rgba(20, 28, 45, 0.72);
+  --glass-input: rgba(255, 255, 255, 0.06);
+  --glass-brd: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, .40);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --glass: rgba(24, 33, 52, 0.55);
+    --glass-2: rgba(20, 28, 45, 0.72);
+    --glass-input: rgba(255, 255, 255, 0.06);
+    --glass-brd: rgba(255, 255, 255, 0.12);
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, .40);
+  }
+}
+
+/* Fondo colorato "vetrato" dietro tutto (le superfici lo sfocano) */
+body {
+  background:
+    radial-gradient(42% 34% at 10% 6%, rgba(37, 99, 235, .34), transparent 70%),
+    radial-gradient(40% 32% at 92% 8%, rgba(250, 204, 21, .26), transparent 70%),
+    radial-gradient(55% 46% at 52% 110%, rgba(59, 130, 246, .30), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+.admin-screen {
+  background:
+    radial-gradient(42% 30% at 10% 4%, rgba(37, 99, 235, .30), transparent 70%),
+    radial-gradient(40% 30% at 92% 8%, rgba(250, 204, 21, .22), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Superfici in vetro */
+.card, .stat, .shift-item, .emp-card, .cal-day, .cal-nav button,
+.chip-btn, .admin-back, .icon-btn, .sheet-close, .chip, .seg {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-brd);
+  box-shadow: var(--glass-shadow);
+}
+.field input, .field select, .field textarea, .tsel {
+  background: var(--glass-input);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-brd);
+}
+
+/* Barre e pannelli più "spessi" (frosted) */
+.tabbar {
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-top: 1px solid var(--glass-brd);
+}
+.tab.fab { border: 3px solid var(--glass-2); }
+.topbar {
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 1px solid var(--glass-brd);
+}
+.sheet, .auth-card {
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid var(--glass-brd);
+}
+
+/* Hero: vetro blu con riflesso */
+.hero {
+  border: 1px solid rgba(255, 255, 255, .28);
+  box-shadow: 0 10px 30px rgba(37, 99, 235, .38), inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+
+/* Ripristina il pieno dove serve il contrasto (non traslucido) */
+.tab.fab, .btn, .toggle.on, .chip.on, .cal-day.selected, .emp-avatar {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
 /* ---------- Report di stampa (PDF del mese) ---------- */
 #print-report { display: none; }
 @media print {
