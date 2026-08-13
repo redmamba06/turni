@@ -933,11 +933,10 @@
       const d = S.parseYmd(s.date);
       const dn = DOW[(d.getDay() + 6) % 7] + ' ' + d.getDate();
       const when = s.type === 'bulk' ? (s.label || 'Ore') : ((s.start || '--') + '-' + (s.end || '--'));
-      const rate = s.rating ? ' (' + s.rating + '/5)' : '';
       const nm = locName(s.locationId);
       doc.setTextColor(15, 23, 42);
       doc.text(dn, col.day, yy);
-      doc.text(trunc(when + rate, 108), col.when, yy);
+      doc.text(trunc(when, 108), col.when, yy);
       doc.text(trunc(nm || '-', 255), col.loc, yy);
       doc.text(fmtHours(S.shiftHours(s)), col.hoursR, yy, { align: 'right' });
       doc.setTextColor(22, 163, 74);
